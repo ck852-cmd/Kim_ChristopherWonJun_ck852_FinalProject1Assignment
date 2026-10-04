@@ -1,0 +1,10 @@
+.DS_Store
+/.preview/
+
+# Reference material for the piece, kept out of the repository (not used by the page)
+/*.mp4
+/*.webp
+/*.png
+/*.jpg
+/*.jpeg
+/*.svg

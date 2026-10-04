@@ -1,0 +1,267 @@
+/* Gaze Field — page chrome. The artwork itself is drawn on the canvas. */
+
+:root {
+  color-scheme: dark;
+  --space: #000;
+  --glass: rgba(8, 9, 14, 0.62);
+  --ink: #dfe3ee;
+  --ink-2: rgba(223, 227, 238, 0.66);
+  --ink-3: rgba(223, 227, 238, 0.4);
+  --hair: rgba(223, 227, 238, 0.14);
+  --font: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --gutter: 22px;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--space);
+  color: var(--ink);
+  font-family: var(--font);
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent;
+}
+
+#field {
+  position: fixed;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: var(--space);
+  touch-action: none;
+  cursor: none; /* the canvas draws its own faint cursor ring */
+}
+
+/* ---- Small typographic marks ------------------------------------------ */
+
+.mark {
+  position: fixed;
+  top: max(18px, env(safe-area-inset-top));
+  left: max(var(--gutter), env(safe-area-inset-left));
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+  pointer-events: none;
+  user-select: none;
+}
+
+.status {
+  position: fixed;
+  top: max(18px, env(safe-area-inset-top));
+  right: max(var(--gutter), env(safe-area-inset-right));
+  margin: 0;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  color: var(--ink-2);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+
+.status.is-visible {
+  opacity: 1;
+}
+
+/* ---- Opening ---------------------------------------------------------------
+   The title and the instruction float over the drifting galaxy, and fade
+   away as the system awakens. */
+
+.intro {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 22px;
+  padding: 0 var(--gutter);
+  text-align: center;
+  pointer-events: none;
+  user-select: none;
+  opacity: 0;
+  transition: opacity 2.2s ease, filter 1.4s ease, transform 2s ease;
+}
+
+.intro.is-shown {
+  opacity: 1;
+}
+
+/* a soft pool of darkness behind the words keeps them legible over the core */
+.intro::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: min(820px, 130vw);
+  height: 320px;
+  transform: translate(-50%, -50%);
+  background: radial-gradient(closest-side, rgba(0, 0, 0, 0.66), rgba(0, 0, 0, 0));
+  z-index: -1;
+}
+
+.intro__title {
+  margin: 0;
+  font-size: clamp(26px, 5.2vw, 58px);
+  font-weight: 400;
+  line-height: 1;
+  letter-spacing: 0.42em;
+  text-indent: 0.42em; /* balances the trailing letter-space so the word sits centred */
+  text-transform: uppercase;
+  color: var(--ink);
+  text-shadow: 0 0 28px rgba(150, 172, 255, 0.35);
+}
+
+.intro__hint {
+  margin: 0;
+  font-size: 13px;
+  letter-spacing: 0.14em;
+  color: rgba(223, 227, 238, 0.86);
+  text-shadow: 0 0 10px rgba(0, 0, 0, 0.9), 0 0 2px rgba(0, 0, 0, 0.9);
+  animation: intro-breathe 3.4s ease-in-out 2.2s infinite;
+}
+
+.intro.is-leaving {
+  opacity: 0;
+  filter: blur(8px);
+  transform: scale(1.05);
+  transition-duration: 1.4s, 1.4s, 2s;
+}
+
+/* while the field sleeps, its chrome waits */
+.mark {
+  transition: opacity 1.2s ease;
+}
+
+.is-intro .mark,
+.is-intro .help {
+  opacity: 0;
+  pointer-events: none;
+}
+
+@keyframes intro-breathe {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .intro__hint {
+    animation: none;
+  }
+}
+
+/* ---- Instruction panel (H) --------------------------------------------- */
+
+.help {
+  position: fixed;
+  left: max(var(--gutter), env(safe-area-inset-left));
+  bottom: max(18px, env(safe-area-inset-bottom));
+  width: 210px;
+  padding: 10px 12px 8px;
+  font-size: 10.5px;
+  line-height: 1.5;
+  color: var(--ink-2);
+  background: var(--glass);
+  border: 1px solid var(--hair);
+  border-radius: 2px;
+  -webkit-backdrop-filter: blur(4px);
+  backdrop-filter: blur(4px);
+  transition: opacity 0.35s ease, transform 0.35s ease;
+}
+
+.help.is-hidden {
+  opacity: 0;
+  transform: translateY(6px);
+  pointer-events: none;
+}
+
+.help p {
+  margin: 0 0 5px;
+}
+
+.help .lead {
+  font-weight: 500;
+  color: var(--ink);
+}
+
+.help .keys {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px 8px;
+  margin: 8px 0 0;
+  padding-top: 8px;
+  border-top: 1px solid var(--hair);
+  color: var(--ink-3);
+}
+
+kbd {
+  display: inline-block;
+  margin-right: 3px;
+  padding: 0 4px;
+  font-family: inherit;
+  font-size: 9.5px;
+  line-height: 15px;
+  color: var(--ink);
+  border: 1px solid var(--hair);
+  border-bottom-width: 2px;
+  border-radius: 3px;
+}
+
+.only-coarse {
+  display: none;
+}
+
+@media (pointer: coarse) {
+  .only-fine,
+  .help .keys {
+    display: none;
+  }
+
+  .only-coarse {
+    display: inline;
+  }
+}
+
+.noscript {
+  position: fixed;
+  inset: auto 0 50% 0;
+  text-align: center;
+  font-size: 12px;
+  color: var(--ink-2);
+}
+
+/* ---- Small screens ----------------------------------------------------- */
+
+@media (max-width: 640px) {
+  :root {
+    --gutter: 14px;
+  }
+
+  .intro__title {
+    letter-spacing: 0.3em;
+    text-indent: 0.3em;
+  }
+
+  .intro__hint {
+    font-size: 12px;
+    letter-spacing: 0.06em;
+  }
+
+  .help {
+    width: min(210px, calc(100vw - 28px));
+    padding: 8px 10px 6px;
+    font-size: 10px;
+  }
+}
