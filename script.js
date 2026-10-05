@@ -3,150 +3,147 @@
 /* ==========================================================================
    GAZE FIELD
    --------------------------------------------------------------------------
-   A fixed 5 × 8 array of luminous nuclei on a black field. Each nucleus
-   holds a small galaxy of orbiting star particles; the nuclei never move,
-   only their particles do.
+   A predator and its prey, drawn in starlight on a black field.
 
-   One cursor is a negative charge and the particles are positive, so they
-   are drawn toward it: a slow cursor gently pulls and stretches the
-   orbits, a fast one tears nearby systems apart. Loose stars drift among
-   the loose stars of other systems and attract them, and where stars from
-   different nuclei collide they fuse into comets that chase the cursor.
+   Prey: clumps of star particles that flock (separation, alignment and
+   cohesion) and wander slowly, hovering across the screen.
+   Predator: a cosmic eye that follows the cursor. Its vision cone points the
+   way it is moving, and it acts on clumps only.
 
-   There is no timer. Every star remembers when it was last strongly
-   affected; after a few quiet seconds a weak pull toward its own nucleus
-   and its own place on that orbit wakes up, gradually. Strong forces
-   overpower it; when they fade, it takes over, comets stretch apart along
-   their stars' different ways home, and every star glides back into orbit.
-   What the eye is looking at does not wait: while the cursor is slow, any
-   star or comet inside the eye's gaze is sent home at once.
+   The life cycle
+     1. A clump that enters the vision cone bursts outward, away from the eye:
+        a soft firework, with short streaks and no flash.
+     2. After SCATTER_TIME its particles pull back together and fuse into a
+        single comet.
+     3. Comets fly fast in straight lines, bounce off the screen edges and
+        trail a glowing tail. A comet's size shows how many particles it holds.
+     4. When two comets collide, a firework: a flash at the point of impact
+        and every particle bursting out radially at high speed with a fading
+        streak. They slow, and after BURST_TIME gather back into one new clump
+        that resumes flocking.
+     5. Particles are conserved: scattering, fusing and colliding never change
+      the total. Only a click adds particles (a small new clump), up to
+      MAX_PARTICLES.
 
-   One cosmic eye sits at the exact centre: a living polar spectrogram of
-   fine light, written ray by ray around a dark pupil that follows the
-   cursor. Its field pushes away what it faces and draws in what lies
-   behind its gaze.
-
-     particle movement = orbit + cursor attraction + eye push-or-pull
-                         + attraction between loose stars + flow
-                         + delayed pull toward home
-
-   World space: 1 unit = the short spacing of the array, origin = the eye =
-   canvas centre. Time: forces and speeds are expressed per 1/60 s frame.
+   World space: 1 unit is 1/5.6 of the screen's short side; the origin is the
+   centre of the screen. Speeds are in units per second.
    ========================================================================== */
 
 const CONFIG = {
-  /* Energy: the main controls ----------------------------------------------
-     cursorEnergy (0…1) is the cursor's smoothed speed, normalised. */
-  BASE_MOTION: 1,                 // orbital drift, twinkle and turbulence (0 = still, 2 = restless)
-  CURSOR_SPEED_SENSITIVITY: 0.3,  // higher → less cursor speed needed for full energy
-  CURSOR_FORCE_MULTIPLIER: 1,     // overall scale on the cursor's pull
-  TRAIL_SECONDS: 0.28,            // how long a star trail lingers when calm
-  TRAIL_ENERGY_MULTIPLIER: 1.2,   // how much energy lengthens the trails
+  /* Prey: clumps of particles that flock and wander ------------------------- */
+  PARTICLE_COUNT: 2000,           // particles at the start; only clicks add more (up to MAX_PARTICLES)
+  MAX_PARTICLES: 3000,            // the most there can ever be, for smooth performance: at the limit, clicks do nothing
+  CLUMP_COUNT: 18,                // clumps at the start, of different sizes, spread across the screen
+  CLUMP_SPEED: 0.5,               // top speed of a flocking particle (units / s): active, still far slower than comets
+  SEPARATION_WEIGHT: 1.8,         // boids: keep a little room from close flockmates …
+  ALIGNMENT_WEIGHT: 0.7,          // … match their velocity …
+  COHESION_WEIGHT: 0.65,          // … and stay with the flock
+  WANDER_WEIGHT: 0.6,             // the slow random current that carries clumps across the screen
+  CLUMP_DRIFT_WEIGHT: 0.35,       // each clump's own random drift, so clumps head off in varied directions
+  CLUMP_DRIFT_TURN: 0.2,          // how quickly each clump's drift direction wanders
+  NEIGHBOR_RADIUS: 0.26,          // how far a particle sees its flockmates (units)
+  SEPARATION_RADIUS: 0.06,        // flockmates closer than this push apart (units): big clumps stay airy
+  MAX_NEIGHBORS: 40,              // most flockmates one particle considers, so dense spots stay cheap
+  WANDER_SCALE: 1.5,              // how tight the wander current's swirls are: tighter swirls shear
+                                  //   big clumps apart, broader ones let clumps drift together and merge
+  WANDER_RATE: 0.05,              // how quickly the wander current changes
+  CLUMP_COOLDOWN: 1,              // seconds a newly formed clump is safe from the eye
 
-  /* Opening: a drifting galaxy that awakens into the field ------------------ */
+  /* Click to spawn ------------------------------------------------------------ */
+  CLICK_CLUMP_SIZE: [30, 50],     // particles in a clump spawned by a click (a random size in this range)
+  CLICK_COOLDOWN: 1,              // seconds a spawned clump is safe from the eye
+  MIN_CLUMP: 3,                   // fewer particles than this are strays, not a clump: the eye ignores them
+
+  /* Predator: the eye --------------------------------------------------------- */
+  EYE_FOLLOW: 2.4,                // how tightly the eye follows the cursor (1 / s)
+  EYE_MAX_SPEED: 4.5,             // the eye's top speed (units / s)
+  CONE_ANGLE: 30,                 // full opening angle of the vision cone (degrees)
+  CONE_LENGTH: 1.3,               // how far the eye sees (units)
+
+  /* Firework: two comets collide ------------------------------------------- */
+  BURST_SPEED: 5.5,               // how fast the collision flings every particle outward (units / s)
+  BURST_TIME: 1.2,                // seconds they fly before gathering back into a new clump
+  BURST_DRAG: 2.6,                // drag on bursting particles (1 / s): how quickly they slow down
+  TRAIL_LENGTH: 0.13,             // a bursting particle's fading streak, in seconds of its motion
+  BURST_SPREAD: 0.35,             // randomness of each particle's speed (± share) …
+  BURST_JITTER: 0.3,              // … and of its angle (rad), so the burst looks organic, not a circle
+  BURST_FLASH: 0.45,              // seconds the flash at the point of impact lasts
+  GATHER_PULL: 5,                 // how hard the particles then pull back together into a clump (1 / s²)
+  GATHER_TIME: 1.2,               // longest the gathering lasts before they become a clump anyway (s)
+
+  /* The eye's scatter: the same burst, softer, with no flash, then a comet ---- */
+  SCATTER_TIME: 1,                // seconds the particles fly apart before pulling back together
+  SCATTER_FORCE: 2.2,             // their outward speed (units / s): well below BURST_SPEED
+  SCATTER_DRAG: 2.4,              // how quickly the scatter slows (1 / s)
+  SCATTER_TRAIL: 0.06,            // their shorter streaks (seconds of motion)
+  FUSE_PULL: 7,                   // how hard they pull back to their centre (1 / s²)
+  FUSE_TIME: 0.9,                 // longest the pull lasts before they fuse anyway (s)
+
+  /* Comets -------------------------------------------------------------------- */
+  COMET_SPEED: 3.2,               // comets fly this fast in straight lines (units / s)
+  COMET_RADIUS: 0.012,            // collision radius per √(particles inside) (units)
+  COMET_COOLDOWN: 0.8,            // seconds a new comet cannot collide
+  COMET_TAIL: 1.1,                // tail length of a big comet (units)
+  BOUNCE_JITTER: 8,               // degrees of random turn at each bounce, so paths never lock into a loop
+
+  /* Comets come and go without a blink ---------------------------------------- */
+  COMET_FADE_TIME: 0.5,           // seconds a colliding comet's glow takes to swell and fade away
+  EMBER_COUNT: 24,                // sparks thrown off when a big comet disintegrates
+  emberLife: [0.5, 1.2],          // seconds each spark lasts, shrinking and fading all the while
+  emberSize: 0.55,                // a spark's size compared with a star
+  emberScatter: 0.9,              // how fast sparks scatter outward (units / s)
+  emberMax: 700,                  // most sparks alive at once
+  starColourFade: 0.8,            // seconds a particle takes to lose its comet colours
+
+  /* Opening: a drifting galaxy that awakens into the clumps ------------------ */
   INTRO_ENABLED: true,            // false skips the opening screen
   INTRO_DRIFT_SPEED: 1,           // how quickly the opening galaxy turns (1 = slowly)
-  INTRO_TRANSFORM_TIME: 2.4,      // seconds each star takes to fly from the galaxy to its orbit
+  INTRO_TRANSFORM_TIME: 2.4,      // seconds each star takes to fly from the galaxy to its clump
   INTRO_STAGGER: 1.3,             // spread of departure times, inner galaxy first (seconds)
   INTRO_WAKE_DISTANCE: 12,        // pixels the pointer must travel to awaken the system
   INTRO_MIN_TIME: 1.2,            // seconds the opening shows before a movement can awaken it
 
-  /* Nuclei and their orbiting particles ------------------------------------- */
-  NUCLEUS_ROWS: 5,                // the fixed 5 × 8 array (turned upright on portrait screens)
-  NUCLEUS_COLUMNS: 8,
-  PARTICLES_PER_NUCLEUS: 90,
-  ORBIT_RADIUS: 0.3,              // outermost orbit (units)
-  ORBIT_SPEED: 0.9,               // angular speed at the outer orbit (rad / s); inner orbits run faster
+  /* Look ------------------------------------------------------------------------ */
+  BASE_MOTION: 1,                 // idle life: the opening galaxy's drift and the eye's saccades
   PARTICLE_SIZE: 0.011,           // particle radius (units)
-  ORBIT_SPRING: 0.06,             // how firmly particles hold their orbits (per frame²)
-  STRETCH_AMOUNT: 2.2,            // how far a slow cursor pulls orbits toward itself
-  DISINTEGRATION_THRESHOLD: 0.55, // local energy above which a system starts to break
-  DISINTEGRATION_RATE: 90,        // how quickly energy past that threshold breaks it
-  SCATTER_FORCE: 0.035,           // velocity given to released particles along the cursor's path
-  GLOW_STRENGTH: 0.85,            // glow around nuclei and particles
+  GLOW_STRENGTH: 0.85,            // glow around particles
+  TRAIL_SECONDS: 0.28,            // how long a star trail lingers when calm
+  TRAIL_ENERGY_MULTIPLIER: 1.2,   // how much cursor energy lengthens the trails
+  trailPixelRatio: 1.5,           // resolution of the trail layer (lower = faster, softer)
+  trailOpacity: 0.4,              // brightness of each new trail segment
+  trailBlackPoint: 241,           // 255 = off; lower clears more of the faint trail floor
+  starOpacity: 0.8,               // brightness of the star heads
+  maxPixelRatio: 2,
+  worldLong: 12.1,                // the visible world, in units, along the screen's long side …
+  worldShort: 5.6,                // … and its short side
+  flowScale: 0.85,                // the curl flow behind the opening drift and the wander current
+  flowSpeed: 0.16,
 
-  /* Coming home: a delayed attraction, not a deadline -------------------------
-     Each star remembers when it was last strongly affected. After
-     INACTIVITY_DELAY seconds of quiet, a weak pull toward its own home
-     position wakes up gradually; strong forces overpower it at any time. */
-  INACTIVITY_DELAY: 3,            // seconds of quiet before the pull home starts to wake
-  GAZE_CONE_ANGLE: 45,            // full opening angle of the eye's gaze (degrees) …
-  GAZE_RETURN_SPEED: 1,           // … while the smoothed cursor speed is below this (units / s), any star
-                                  //   or comet inside the gaze is sent home at once, without the delay
-  INTERACTION_THRESHOLD: 0.0004,  // push from the cursor or eye that counts as meaningful (units / frame²)
-  HOME_ATTRACTION: 0.0004,        // the weak pull toward its own place on its own orbit (units / frame²)
-  HOME_DISTANCE_SCALE: 0.6,       // the pull grows by this share per unit of distance from home
-  RETURN_DAMPING: 0.05,           // damping toward its orbit's motion while returning (per frame)
-  MAX_RETURN_SPEED: 1.6,          // top speed while returning, relative to its orbit (units / s)
-  STEERING_SMOOTHNESS: 0.2,       // how quickly steering forces take effect (per frame; lower = smoother)
-  homeRamp: 2,                    // seconds over which the pull home fades in after the delay
-  gazeHomeEase: 0.5,              // seconds: how quickly the pull home rises for a star the eye sends home
-  homeEaseRadius: 0.15,           // the pull eases out within this distance, so stars arrive gently
-  rebindRadius: 0.07,             // close enough to its place to begin locking back into orbit
-  rebindTime: 0.8,                // seconds to lock back into its orbit
-  burstTime: 0.25,                // seconds over which a released star is accelerated away
-  returnBrake: 0.006,             // how quickly a too-fast returning star slows (units / frame²)
+  /* Vector field arrows (V): the eye's force, made visible ------------------ */
+  ARROWS_ON: true,                // arrows enabled at start (V turns them off completely)
+  ARROW_SPACING: 54,              // pixels between arrows
+  ARROW_MAX_LENGTH: 44,           // longest arrow (pixels), where the eye's force is strongest
+  ARROW_MIN_LENGTH: 16,           // shortest arrow (pixels), so even a weak force still reads as an arrow
+  ARROW_WIDTH: 1.6,               // line thickness (pixels); the arrowheads scale with it
+  ARROW_OPACITY: 0.85,            // opacity of the strongest arrows; where the eye's force is absent, they are invisible
+  ARROW_FADE: 1,                  // seconds for the arrows to fade in once the cursor moves the eye, and out when it stops
+  ARROW_RISE: 0.12,               // seconds for an arrow to grow when the eye's force arrives (quick, so a passing eye shows)
+  ARROW_EASE: 0.45,               // seconds for an arrow to ease back down as the eye's force leaves it
+  ARROW_WAKE_REACH: 1.5,          // units behind the eyeball at which its wake has faded to half
 
-  /* Loose stars and comets ---------------------------------------------------- */
-  PARTICLE_ATTRACTION: 0.00012,   // pull between loose stars, whatever their nucleus
-  interactionRadius: 0.45,        // reach of that pull (units)
-  COMET_MERGE_DISTANCE: 0.07,     // loose stars from different nuclei this close fuse into a comet
-  COMET_CAPTURE_RADIUS: 0.32,     // a comet's head gathers loose stars within this radius
-  COMET_CURSOR_ATTRACTION: 1,     // how strongly comets steer toward the cursor (the strongest pull)
-  COMET_GAZE_INFLUENCE: 0.35,     // how strongly the eye's gaze steers them as well
-  COMET_TURN_RATE: 2.4,           // how quickly a comet can bend its path (rad / s): its momentum
-  COMET_MIN_SPEED: 0.8,           // units per second; comets keep their founders' speed within
-  COMET_MAX_SPEED: 5,             //   this range, so they never stall or outrun their stars
-  COMET_TAIL_LENGTH: 1.5,         // units, for a fully grown comet
-  COMET_MAX: 8,                   // comets alive at once
-  COMET_MAX_MEMBERS: 70,          // stars one comet can hold
-  COMET_RELEASE_DISTANCE: 0.4,    // a star pulled this far from its comet place by its home lets go
-  cometCooldown: 1.5,             // seconds a star waits before it can join another comet
-  cometSpring: 0.07,              // how firmly comet stars keep their place in head and tail
-  cometDamping: 0.2,
-
-  /* Dissolving: comets and their stars fade away, never blink out ----------- */
-  COMET_FADE_TIME: 1.2,           // seconds a dissolving comet's glow takes to fade and shrink away
-  EMBER_COUNT: 46,                // small sparks a fully grown comet scatters into as it dissolves
-  emberLife: [0.6, 1.5],          // seconds each spark lasts, shrinking and fading all the while
-  emberSize: 0.55,                // a spark's size compared with a star
-  emberScatter: 0.9,              // how fast sparks scatter outward (units / s)
-  emberMax: 700,                  // most sparks alive at once
-  starColourFade: 0.6,            // seconds a star takes to lose its comet colours once it lets go
-
-  /* Layout --------------------------------------------------------------------- */
-  longSpacing: 1.5,               // spacing along the 8-nucleus side (leaves room for the eye)
-  shortSpacing: 1,                // spacing along the 5-nucleus side (the world unit)
-  layoutMargin: 0.8,              // free space around the array (units)
-  seed: 11,                       // same seed → same starting systems
-
-  /* Cursor: the single negative attractor ------------------------------------ */
-  cursorBaseStrength: 0.0002,     // pull of a still cursor (deliberately faint)
-  cursorAttraction: 0.012,        // extra pull at full energy
-  cursorSpeedCurve: 1,            // >1 keeps slow movement gentle, fast movement strong
+  /* Cursor ---------------------------------------------------------------------- */
+  CURSOR_SPEED_SENSITIVITY: 0.3,  // higher → less cursor speed needed for full energy (the eye's glow)
   cursorSpeedSmoothing: 0.12,     // seconds; smooths the per-frame speed reading
-  cursorReach: 0.8,               // falloff radius of the pull (units)
-  cursorCore: 0.12,               // pull fades to zero inside this radius
-  proximityRadius: 1,             // systems within about this distance feel the cursor's energy
   pointerFadeIn: 0.25,            // seconds
-  pointerFadeOut: 1.4,            // seconds for influence to fade once the pointer leaves
+  pointerFadeOut: 1.4,            // seconds for presence to fade once the pointer leaves
 
-  /* Eye: directional push / pull --------------------------------------------- */
-  eyeRepulsion: 0.00016,          // push on particles in front of the gaze
-  eyeAttraction: 0.00014,         // pull on particles behind the gaze
-  eyeEnergyGain: 2.6,             // eye field grows by up to this factor with energy
-  eyeBlendSharpness: 2.4,         // tanh steepness across the gaze boundary
-  eyeRange: 2.3,                  // falloff radius of the eye field (units)
-  eyeClearRadius: 0.5,            // particles are kept outside this radius
-  eyeClearStrength: 0.02,
-
-  /* Eye: a galactic eyeball; its iris after the spectrogram in "Eye Design.mp4" */
-  EYEBALL_RADIUS: 0.44,           // the eyeball, fixed at the centre (units)
+  /* The eyeball: its look ----------------------------------------------------------- */
+  EYEBALL_RADIUS: 0.44,           // the eyeball (units)
   IRIS_RADIUS: 0.24,              // the iris on its surface (units)
   eyePupil: 0.42,                 // pupil radius as a share of the iris
-  EYE_MAX_TURN: 0.62,             // furthest the eyeball rotates toward the cursor (rad)
-  EYE_STIFFNESS: 55,              // spring of the eyeball's rotation when calm (1 / s²)
-  EYE_SPEED_RESPONSE: 2.2,        // faster cursor → stiffer spring → quicker eye (×)
+  EYE_MAX_TURN: 0.62,             // furthest the iris turns toward its heading (rad)
+  EYE_STIFFNESS: 55,              // spring of the iris's turn when calm (1 / s²)
+  EYE_SPEED_RESPONSE: 2.2,        // faster cursor → stiffer spring → quicker iris (×)
   EYE_DAMPING: 0.72,              // < 1 lets it overshoot slightly and settle, like a real eye
   EYE_GLOW: 0.35,                 // galactic glow when calm; cursor speed brightens it
   eyeSweepPeriod: 7,              // seconds for the iris's write seam to renew the whole iris
@@ -154,27 +151,6 @@ const CONFIG = {
   eyeBrightness: 1.3,             // overall light of the iris
   eyeFlashEvery: [9, 15],         // seconds between moments when the iris thins to rings
   eyeFlashDuration: 0.5,
-
-  /* Idle life and free particles ---------------------------------------------- */
-  flowStrength: 0.0001,           // subtle flowing field
-  flowScale: 0.85,
-  flowSpeed: 0.16,
-  turbulence: 0.00005,            // swirl on detached particles
-  boundDamping: 0.2,              // how tightly bound particles follow their orbit
-  freeDrag: 0.016,                // drag on detached particles
-  particleMaxSpeed: 0.12,         // units per frame
-  particleMaxAcceleration: 0.02,  // units per frame²; caps every change of velocity, damping included
-  leash: 3.5,                     // detached particles are reeled in beyond this distance
-
-  /* Look ---------------------------------------------------------------------- */
-  trailPixelRatio: 1.5,           // resolution of the trail layer (lower = faster, softer)
-  trailOpacity: 0.4,              // brightness of each new trail segment
-  trailBlackPoint: 241,           // 255 = off; lower clears more of the faint trail floor
-  starOpacity: 0.8,               // brightness of the star heads
-  vectorSpacing: 0.42,            // V overlay arrow spacing (units)
-  vectorLength: 0.3,
-  vectorReference: 0.006,
-  maxPixelRatio: 2,
 
   colors: {
     stars: ['#ffffff', '#cfd6e8', '#f3d494', '#a9c3ff', '#c7a2ff'], // white, silver, gold, blue, violet
@@ -195,6 +171,7 @@ const CONFIG = {
     comet: { head: '255, 250, 236', dust: '255, 212, 128', ion: '104, 148, 255', violet: '188, 118, 255' },
     ui: '223, 227, 238',
     eyeGlow: '110, 140, 255',     // the eyeball's galactic glow and rim light
+    field: '138, 164, 255',       // the vector field arrows: a soft blue, a little paler than the eye's glow
     photon: '255, 222, 160',      // gold glint round the pupil
   },
 };
@@ -289,10 +266,10 @@ function resize() {
   trail.width = Math.max(1, Math.round(w * view.tdpr));
   trail.height = Math.max(1, Math.round(h * view.tdpr));
 
-  // 8 nuclei along the long side of the screen, 5 along the short side.
+  // The visible world: worldLong units along the screen's long side, worldShort along the short side.
   const portrait = h > w;
-  const long = (CONFIG.NUCLEUS_COLUMNS - 1) * CONFIG.longSpacing + 2 * CONFIG.layoutMargin;
-  const short = (CONFIG.NUCLEUS_ROWS - 1) * CONFIG.shortSpacing + 2 * CONFIG.layoutMargin;
+  const long = CONFIG.worldLong;
+  const short = CONFIG.worldShort;
   view.cell = portrait ? Math.min(w / short, h / long) : Math.min(w / long, h / short);
   view.cx = w / 2;
   view.cy = h / 2;
@@ -302,7 +279,11 @@ function resize() {
 
   const turned = view.portrait !== portrait;
   view.portrait = portrait;
-  if (turned && systems.length) createSystems();
+  // turned on its side during the opening: lay the clumps out afresh for the new shape
+  if (turned && P.n && intro.phase === 'idle') {
+    seedClumps();
+    initIntro();
+  }
   state.clearTrails = true;
 }
 
@@ -414,33 +395,24 @@ function makeTailSprite(rgb) {
 const state = {
   time: 0,
   paused: false,
-  showVectors: false,
-  cursorEnergy: 0,       // 0…1, the smoothed cursor speed: the main energy value
-  energy: 0,             // lingering energy: widens the eye's field for a while
+  showVectors: CONFIG.ARROWS_ON, // V: the vector field arrows
+  debug: false,          // D: the debug overlay
+  cursorEnergy: 0,       // 0…1, the smoothed cursor speed (brightens the eye's glow)
+  energy: 0,             // a lingering copy of it
   clearTrails: true,
 };
 
 const cursor = {
-  x: 2.1, y: -0.55,      // world position (a resting glance to the right)
+  x: 2.1, y: -0.55,      // world position
   lastX: 2.1, lastY: -0.55,
   speed: 0,              // smoothed speed, units / second
-  svx: 0, svy: 0,        // smoothed velocity
-  dirX: 1, dirY: 0,      // smoothed direction of travel
   presence: 0,           // 0 = gone … 1 = on the canvas
   targetPresence: 0,
   skipSample: true,
 };
 
-const gaze = { x: 1, y: 0, dist: 1 };
-const field = { cursorStrength: 0, eyeGain: 1 };
-
-/* ==========================================================================
-   Forces
-   ========================================================================== */
-
 const FLOW = { x: 0, y: 0 };
-const FF = { x: 0, y: 0 };
-const EYE = { x: 0, y: 0, dir: 0 };
+
 
 /* A divergence-free "curl" flow from a layered stream function ψ(x, y, t):
    v = (∂ψ/∂y, −∂ψ/∂x). It swirls gently without sources or sinks. */
@@ -462,841 +434,740 @@ function flowAt(x, y, t, out) {
   out.y = -dPsiDx;
 }
 
-/* ── The eye's gaze ────────────────────────────────────────────────────────
-   A point is inside the gaze when its direction from the eye lies within
-   half of GAZE_CONE_ANGLE of the gaze direction. */
-function inGaze(x, y) {
-  return x * gaze.x + y * gaze.y >= Math.cos((CONFIG.GAZE_CONE_ANGLE * Math.PI) / 360) * Math.hypot(x, y);
-}
-
-/* ── Eye field ─────────────────────────────────────────────────────────────
-   u is the unit vector from the eye (the origin) to the point. */
-function eyeAt(x, y, out, clearWeight = 1) {
-  const ed = Math.hypot(x, y) + 1e-6;
-  const ux = x / ed;
-  const uy = y / ed;
-
-  /* Dot-product calculation: compare this point's direction with the gaze.
-       facing > 0 → the point lies in front of the gaze
-       facing < 0 → the point lies behind it */
-  const facing = ux * gaze.x + uy * gaze.y;
-
-  /* Attraction-versus-repulsion blending: tanh turns the dot product into a
-     soft −1…+1 switch, so there is no hard dividing line between the two
-     halves. Positive pushes along +u (away from the eye); negative pulls
-     along −u (toward it). */
-  const side = Math.tanh(CONFIG.eyeBlendSharpness * facing);
-  let eyeF = side * (side > 0 ? CONFIG.eyeRepulsion : CONFIG.eyeAttraction);
-  eyeF *= field.eyeGain / (1 + (ed / CONFIG.eyeRange) ** 2);
-  // The pull eases off right beside the eye so nothing gets swallowed by it.
-  if (side < 0) eyeF *= smoothstep(CONFIG.eyeClearRadius * 0.9, CONFIG.eyeClearRadius + 0.5, ed);
-
-  // How hard the gaze itself pushes or pulls here (the clear zone below is a
-  // fixed boundary, so it does not count as an interaction).
-  out.dir = Math.abs(eyeF);
-
-  // A small clear zone keeps the eye readable above everything else.
-  if (ed < CONFIG.eyeClearRadius) eyeF += (CONFIG.eyeClearRadius - ed) * CONFIG.eyeClearStrength * clearWeight;
-
-  out.x = ux * eyeF;
-  out.y = uy * eyeF;
-}
-
-/* ── Cursor attraction ─────────────────────────────────────────────────────
-   Opposite charges attract: particles are drawn toward the cursor. The
-   strength comes from cursorEnergy (updateCursor); a Lorentzian falloff
-   1 / (1 + d²/R²) keeps it local, and it fades to zero inside a small core
-   so nothing collapses onto the cursor itself. */
-function cursorPullAt(x, y, out) {
-  const dx = cursor.x - x;
-  const dy = cursor.y - y;
-  const d2 = dx * dx + dy * dy;
-  const d = Math.sqrt(d2) + 1e-6;
-  const R = CONFIG.cursorReach;
-  const pull = (field.cursorStrength / (1 + d2 / (R * R))) * smoothstep(0, CONFIG.cursorCore, d);
-  out.x = (dx / d) * pull;
-  out.y = (dy / d) * pull;
-}
-
-// cursor attraction + eye push-or-pull + flow, for the V overlay
-function fieldAt(x, y, out) {
-  cursorPullAt(x, y, out);
-  const ax = out.x;
-  const ay = out.y;
-  eyeAt(x, y, EYE);
-  flowAt(x, y, state.time, FLOW);
-  const flow = CONFIG.flowStrength * CONFIG.BASE_MOTION;
-  out.x = ax + EYE.x + FLOW.x * flow;
-  out.y = ay + EYE.y + FLOW.y * flow;
-}
-
 /* ==========================================================================
-   Cursor, gaze and energy
+   Cursor
    ========================================================================== */
 
+/* Speed is measured once per frame from how far the cursor moved, and
+   smoothed; presence eases in and out as the pointer arrives and leaves. */
 function updateCursor(dt) {
-  /* ── Cursor-speed calculation ───────────────────────────────────────────
-     Speed is measured once per frame, in units per second, from how far the
-     cursor moved since the previous frame. A still cursor therefore reads 0
-     even though no pointer events arrive. Exponential smoothing turns the
-     jittery per-frame reading into a steady value with no sudden jumps. */
-  let mvx = 0;
-  let mvy = 0;
+  let mv = 0;
   if (cursor.skipSample) {
     cursor.skipSample = false; // a re-entry or touch-down jump is not speed
   } else {
-    const inv = 1 / Math.max(dt, 1 / 240);
-    mvx = (cursor.x - cursor.lastX) * inv;
-    mvy = (cursor.y - cursor.lastY) * inv;
+    mv = Math.hypot(cursor.x - cursor.lastX, cursor.y - cursor.lastY) / Math.max(dt, 1 / 240);
   }
   cursor.lastX = cursor.x;
   cursor.lastY = cursor.y;
-  const raw = Math.min(Math.hypot(mvx, mvy), 60);
-  const ks = 1 - Math.exp(-dt / CONFIG.cursorSpeedSmoothing);
-  cursor.speed += (raw - cursor.speed) * ks;
-
-  // Smoothed direction of travel: scattered particles are flung along it.
-  cursor.svx += (mvx - cursor.svx) * ks;
-  cursor.svy += (mvy - cursor.svy) * ks;
-  const sv = Math.hypot(cursor.svx, cursor.svy);
-  if (sv > 0.05) {
-    cursor.dirX = cursor.svx / sv;
-    cursor.dirY = cursor.svy / sv;
-  }
-
-  // Presence eases in and out, so leaving the canvas fades the pull gradually.
+  cursor.speed += (Math.min(mv, 60) - cursor.speed) * (1 - Math.exp(-dt / CONFIG.cursorSpeedSmoothing));
   const pt = cursor.targetPresence > cursor.presence ? CONFIG.pointerFadeIn : CONFIG.pointerFadeOut;
   cursor.presence += (cursor.targetPresence - cursor.presence) * (1 - Math.exp(-dt / pt));
-
-  /* ── cursorEnergy ───────────────────────────────────────────────────────
-     The smoothed speed mapped onto 0…1 (still → 0, slow → ~0.25, fast →
-     approaching 1) and faded by pointer presence. */
   const e = (1 - Math.exp(-cursor.speed * CONFIG.CURSOR_SPEED_SENSITIVITY)) * cursor.presence;
   state.cursorEnergy = e;
-
-  // Cursor attraction strength: faint when still, strong when fast.
-  field.cursorStrength =
-    CONFIG.CURSOR_FORCE_MULTIPLIER *
-    (cursor.presence * CONFIG.cursorBaseStrength + CONFIG.cursorAttraction * Math.pow(e, CONFIG.cursorSpeedCurve));
-
-  // A lingering copy of the energy widens the eye's field for a while.
   const et = e > state.energy ? 0.18 : 2.4;
   state.energy += (e - state.energy) * (1 - Math.exp(-dt / et));
-  field.eyeGain = 1 + CONFIG.eyeEnergyGain * state.energy;
+}
 
-  /* ── Eye gaze direction ─────────────────────────────────────────────────
-     A normalised vector from the eye (origin) to the cursor. It is eased
-     over a few frames so the field never flips in a single step when the
-     cursor crosses the eye; very close to the eye the last direction holds. */
-  const gl = Math.hypot(cursor.x, cursor.y);
-  gaze.dist = gl;
-  if (gl > 0.02) {
-    const k = 1 - Math.exp(-dt / 0.05);
-    const nx = gaze.x + (cursor.x / gl - gaze.x) * k;
-    const ny = gaze.y + (cursor.y / gl - gaze.y) * k;
-    const n = Math.hypot(nx, ny);
-    if (n > 1e-4) {
-      gaze.x = nx / n;
-      gaze.y = ny / n;
+
+/* ==========================================================================
+   The predator: an eye that follows the cursor
+   --------------------------------------------------------------------------
+   The eye chases the cursor as a critically damped spring, so it follows
+   with a natural lag and never overshoots. Its vision cone points the way it
+   is moving; when it stops, it keeps looking where it was going. It acts on
+   clumps only, never on comets.
+   ========================================================================== */
+
+const eye = { x: 0, y: 0, vx: 0, vy: 0, hx: 1, hy: 0, speed: 0 };
+
+function updateEye(dt) {
+  const k = CONFIG.EYE_FOLLOW;
+  const here = cursor.presence > 0.05;
+  const steps = Math.max(1, Math.ceil(dt * 120));
+  const h = dt / steps;
+  for (let s = 0; s < steps; s++) {
+    // with the pointer gone, it simply coasts to a stop where it is
+    const tx = here ? cursor.x : eye.x;
+    const ty = here ? cursor.y : eye.y;
+    eye.vx += (k * k * (tx - eye.x) - 2 * k * eye.vx) * h;
+    eye.vy += (k * k * (ty - eye.y) - 2 * k * eye.vy) * h;
+    const sp = Math.hypot(eye.vx, eye.vy);
+    if (sp > CONFIG.EYE_MAX_SPEED) {
+      eye.vx *= CONFIG.EYE_MAX_SPEED / sp;
+      eye.vy *= CONFIG.EYE_MAX_SPEED / sp;
     }
+    eye.x += eye.vx * h;
+    eye.y += eye.vy * h;
   }
+  const m = CONFIG.EYEBALL_RADIUS * 0.6;
+  eye.x = clamp(eye.x, -view.halfW + m, view.halfW - m);
+  eye.y = clamp(eye.y, -view.halfH + m, view.halfH - m);
+  eye.speed = Math.hypot(eye.vx, eye.vy);
+
+  // its heading: the way it is moving, eased; held while it is still
+  if (eye.speed > 0.12) {
+    const t = 1 - Math.exp(-dt / 0.12);
+    eye.hx += (eye.vx / eye.speed - eye.hx) * t;
+    eye.hy += (eye.vy / eye.speed - eye.hy) * t;
+    const hl = Math.hypot(eye.hx, eye.hy) || 1;
+    eye.hx /= hl;
+    eye.hy /= hl;
+  }
+}
+
+// Is a point inside the vision cone? (cos = cos of half of CONE_ANGLE)
+function inCone(x, y, cos) {
+  const dx = x - eye.x;
+  const dy = y - eye.y;
+  const d2 = dx * dx + dy * dy;
+  if (d2 > CONFIG.CONE_LENGTH * CONFIG.CONE_LENGTH) return false;
+  const d = Math.sqrt(d2);
+  if (d < CONFIG.EYEBALL_RADIUS) return true; // touching the eye
+  return dx * eye.hx + dy * eye.hy >= cos * d;
 }
 
 /* ==========================================================================
-   Nuclei and their orbiting particles
+   Particles
+   --------------------------------------------------------------------------
+   Every star lives in one set of flat arrays. Each is always in exactly one
+   state, which is how the total is conserved:
+     FLOCK      in a clump, flocking
+     SCATTERED  bursting outward, then pulling back together (into a comet
+                after the eye's scatter, into a clump after a firework)
+     IN_COMET   carried inside a comet, hidden
+   Positions are in world units, velocities in units per second.
    ========================================================================== */
 
-class NucleusSystem {
-  constructor(id, x, y, rand) {
-    const n = CONFIG.PARTICLES_PER_NUCLEUS;
-    const R = CONFIG.ORBIT_RADIUS;
-    this.id = id;
-    this.x = x; // the nucleus: fixed for good
-    this.y = y;
-    this.n = n;
+const FLOCK = 0;
+const SCATTERED = 1;
+const IN_COMET = 2;
 
-    // Each system is a small tilted disk: squashed, turned, spinning one way.
-    this.flat = 0.35 + rand() * 0.45;
-    const angle = rand() * Math.PI;
-    this.ca = Math.cos(angle);
-    this.sa = Math.sin(angle);
-    this.spin = rand() < 0.5 ? -1 : 1;
-    this.twinkle = rand() * TAU;
+const P = { n: 0 };
 
-    /* Every particle's own remembered place: its nucleus is this system, its
-       resting position is its orbit (radius r, angle th, speed w). These are
-       never exchanged or reassigned, so a star always returns to its own
-       nucleus and its own orbit. */
-    this.r = new Float32Array(n);
-    this.th = new Float32Array(n);
-    this.w = new Float32Array(n);
-    this.size = new Float32Array(n);
-    this.bright = new Float32Array(n);
-    this.col = new Uint8Array(n);
-    this.px = new Float32Array(n);
-    this.py = new Float32Array(n);
-    this.vx = new Float32Array(n);
-    this.vy = new Float32Array(n);
-    this.lx = new Float32Array(n);             // position at the last draw (for trail segments)
-    this.ly = new Float32Array(n);
-    this.bond = new Float32Array(n).fill(1);   // 1 = held on its orbit … 0 = flying free
-    this.free = new Uint8Array(n);             // 1 = released, not yet settled back into orbit
-    this.release = new Float32Array(n).fill(-1); // seconds into a break when it lets go (−1 = none due)
-    this.kx = new Float32Array(n);             // its release burst: acceleration per frame …
-    this.ky = new Float32Array(n);
-    this.kt = new Float32Array(n);             // … and seconds of it left
-    this.quiet = new Float32Array(n);          // seconds since it was last strongly affected
-    this.homeOn = new Float32Array(n);         // 0…1 how awake its pull toward home is
-    this.gazeHome = new Uint8Array(n);         // 1 = sent home by the eye's gaze: returning without the delay
-    this.homeDist = new Float32Array(n);       // distance from its home position
-    this.sax = new Float32Array(n);            // its eased steering acceleration
-    this.say = new Float32Array(n);
-    this.ex = new Float32Array(n);             // pull from other loose stars this frame
-    this.ey = new Float32Array(n);
-    this.comet = new Int32Array(n).fill(-1);   // comet it currently flies in (−1 = none)
-    this.cool = new Float32Array(n);           // seconds before it may join a comet again
-    this.cAge = new Float32Array(n);           // seconds since it joined that comet
-    this.mtx = new Float32Array(n);            // its place in that comet's head or tail
-    this.mty = new Float32Array(n);
-    this.ccol = new Uint8Array(n);             // its colour while in a comet
-    this.cmix = new Float32Array(n);           // 0…1 how much it shows its comet colours (eased)
-
-    for (let i = 0; i < n; i++) {
-      // Two loose spiral arms, denser toward the nucleus.
-      const r = R * (0.16 + 0.84 * Math.pow(rand(), 0.8));
-      const g = (rand() + rand() + rand() - 1.5) * 0.5;
-      this.r[i] = r;
-      this.th[i] = (i % 2) * Math.PI + 2.4 * Math.log(r / (R * 0.16)) * this.spin + g;
-      this.w[i] = this.spin * CONFIG.ORBIT_SPEED * (0.8 + 0.7 * (1 - r / R)) * (0.9 + 0.2 * rand());
-      this.size[i] = 0.6 + Math.pow(rand(), 3) * 1.5;
-      this.bright[i] = 0.5 + 0.5 * rand();
-      this.col[i] = pickWeighted(CONFIG.colors.starWeights, rand());
-    }
-
-    this.damage = 0;      // builds while the cursor's energy here is past the threshold
-    this.breakClock = 99; // seconds since the last break (drives the staggered release)
-    this.shown = 1;       // how whole the system looks (nucleus brightness)
-    this.local = 0;       // cursorEnergy as this system feels it
-    this.kickX = 1;
-    this.kickY = 0;
-    this.kickE = 0;
-    this.appear = 1;      // 0 while asleep in the opening galaxy … 1 awake
-    this.placeOnOrbits();
+// Arrays are sized for MAX_PARTICLES; P.n is how many exist right now.
+function allocateParticles(n) {
+  const cap = Math.max(n, CONFIG.MAX_PARTICLES);
+  P.n = n;
+  for (const k of ['x', 'y', 'vx', 'vy', 'ax', 'ay', 'lx', 'ly', 'size', 'bright', 'cool', 'cmix', 'drift', 'trail', 'tx', 'ty', 'gr', 'ga', 'gw', 'gd', 'gu', 'gc']) {
+    P[k] = new Float32Array(cap);
   }
-
-  placeOnOrbits() {
-    for (let i = 0; i < this.n; i++) {
-      const r = this.r[i];
-      const th = this.th[i];
-      const ox = r * Math.cos(th);
-      const oy = r * Math.sin(th) * this.flat;
-      this.px[i] = this.lx[i] = this.x + ox * this.ca - oy * this.sa;
-      this.py[i] = this.ly[i] = this.y + ox * this.sa + oy * this.ca;
-      this.vx[i] = this.vy[i] = 0;
-      this.bond[i] = 1;
-      this.free[i] = 0;
-      this.release[i] = -1;
-      this.kt[i] = 0;
-      this.quiet[i] = 0;
-      this.homeOn[i] = 0;
-      this.gazeHome[i] = 0;
-      this.sax[i] = this.say[i] = 0;
-      this.comet[i] = -1;
-      this.cool[i] = 0;
-      this.cmix[i] = 0;
-    }
-  }
-
-  /* The system's life, star by star. The cursor's energy here builds
-     damage, and full damage breaks the system: its stars let go a few at a
-     time, outer orbits first. There is no timer after that. Each star keeps
-     the time since it was last strongly affected (by the cursor, the eye, a
-     collision or a comet). After INACTIVITY_DELAY seconds of quiet, a weak
-     pull toward its own home position wakes up gradually; any new strong
-     interaction puts it back to sleep, just as gradually. A loose star the
-     eye is looking at while the cursor is slow (or in a comet the eye is
-     looking at) skips the delay: it is sent home at once, and keeps going
-     home until it is back unless a fast cursor takes hold of it. Once the
-     pull has brought it close to its place, it locks back into its orbit. */
-  updateState(dt) {
-    const dx = cursor.x - this.x;
-    const dy = cursor.y - this.y;
-    const pr = CONFIG.proximityRadius;
-    this.local = state.cursorEnergy * Math.exp(-(dx * dx + dy * dy) / (2 * pr * pr));
-
-    const over = this.local - CONFIG.DISINTEGRATION_THRESHOLD;
-    if (over > 0) this.damage += over * CONFIG.DISINTEGRATION_RATE * dt;
-    else this.damage = Math.max(0, this.damage - dt * 0.8);
-    if (this.damage >= 1) this.disintegrate();
-    this.breakClock += dt;
-
-    const delay = CONFIG.INACTIVITY_DELAY;
-    const ramp = CONFIG.homeRamp;
-    const slowCursor = cursor.speed < CONFIG.GAZE_RETURN_SPEED;
-    let whole = 0;
-    for (let i = 0; i < this.n; i++) {
-      if (this.cool[i] > 0) this.cool[i] -= dt;
-      if (this.comet[i] >= 0) this.cAge[i] += dt;
-      this.quiet[i] += dt;
-
-      // its comet colours come and go gradually, never in a blink
-      const inComet = this.comet[i] >= 0 ? 1 : 0;
-      const fade = inComet ? 0.2 : CONFIG.starColourFade;
-      this.cmix[i] += (inComet - this.cmix[i]) * (1 - Math.exp(-dt / fade));
-
-      // its turn to let go, in a break
-      if (this.release[i] >= 0 && this.breakClock >= this.release[i]) {
-        this.release[i] = -1;
-        this.free[i] = 1;
-        this.quiet[i] = 0;
-        this.launch(i);
-      }
-
-      /* ── Sent home by the eye ───────────────────────────────────────────
-         Inside the eye's gaze (itself, or the head of its comet) while the
-         cursor is slower than GAZE_RETURN_SPEED: no waiting. */
-      if (this.free[i] && slowCursor && !this.gazeHome[i]) {
-        const cm = this.comet[i] >= 0 ? cometById.get(this.comet[i]) : null;
-        if (inGaze(this.px[i], this.py[i]) || (cm && inGaze(cm.x, cm.y))) this.gazeHome[i] = 1;
-      }
-
-      /* ── Delayed homing ─────────────────────────────────────────────────
-         Not a deadline: the pull home wakes slowly after the quiet delay,
-         and fades again whenever something strong takes hold of the star.
-         A star the eye sent home wants its full pull at once, though it
-         still eases in rather than switching on. */
-      let want = 0;
-      if (this.free[i]) want = this.gazeHome[i] ? 1 : smoothstep(delay, delay + ramp, this.quiet[i]);
-      const rise = this.gazeHome[i] ? CONFIG.gazeHomeEase : ramp * 0.5;
-      const tau = want > this.homeOn[i] ? rise : 0.35;
-      this.homeOn[i] += (want - this.homeOn[i]) * (1 - Math.exp(-dt / tau));
-
-      // its bond with its orbit: lost while free, regained gently once home
-      if (this.free[i]) {
-        const settling = this.homeOn[i] > 0.5 && this.homeDist[i] < CONFIG.rebindRadius && this.comet[i] < 0;
-        if (settling) this.bond[i] = Math.min(1, this.bond[i] + dt / CONFIG.rebindTime);
-        else this.bond[i] = Math.max(0, this.bond[i] - dt / 0.3);
-        if (this.bond[i] >= 1) {
-          this.free[i] = 0;
-          this.homeOn[i] = 0;
-          this.gazeHome[i] = 0;
-        }
-      } else {
-        this.bond[i] = Math.min(1, this.bond[i] + dt * 2);
-      }
-      whole += this.bond[i];
-    }
-    this.shown += (whole / this.n - this.shown) * (1 - Math.exp(-dt / 0.4));
-  }
-
-  disintegrate() {
-    this.damage = 0;
-    this.breakClock = 0;
-    this.kickX = cursor.dirX;
-    this.kickY = cursor.dirY;
-    this.kickE = state.cursorEnergy;
-    const R = CONFIG.ORBIT_RADIUS;
-    for (let i = 0; i < this.n; i++) {
-      if (this.free[i]) {
-        this.quiet[i] = 0; // already loose: struck again
-        continue;
-      }
-      if (this.release[i] < 0) this.release[i] = (1 - this.r[i] / R) * 0.35 + Math.random() * 0.15;
-    }
-  }
-
-  /* A released star is accelerated along the cursor's path, spreading as it
-     goes. The push is spread over CONFIG.burstTime rather than given at
-     once, so even the break is a continuous motion. */
-  launch(i) {
-    const spread = (Math.random() - 0.5) * 1.2;
-    const c = Math.cos(spread);
-    const s = Math.sin(spread);
-    const kx = this.kickX * c - this.kickY * s;
-    const ky = this.kickX * s + this.kickY * c;
-    const f = CONFIG.SCATTER_FORCE * (0.45 + 0.8 * this.kickE) * (0.5 + Math.random());
-    let ox = this.px[i] - this.x;
-    let oy = this.py[i] - this.y;
-    const ol = Math.hypot(ox, oy) || 1;
-    ox /= ol;
-    oy /= ol;
-    const frames = CONFIG.burstTime * 60;
-    this.kx[i] = (kx * f + ox * f * 0.35) / frames;
-    this.ky[i] = (ky * f + oy * f * 0.35) / frames;
-    this.kt[i] = CONFIG.burstTime;
-  }
-
-  /* ── Particle motion ────────────────────────────────────────────────────
-     Two kinds of force act on a star.
-       · Its holds: the spring to its moving place on its orbit (as strong as
-         its bond) and, in a comet, the spring to its place in that comet.
-       · Steering: the cursor, the eye, other loose stars, a little swirl, its
-         release burst and, once awake, its pull toward home. Steering is
-         eased in (STEERING_SMOOTHNESS) rather than applied as a jolt, so a
-         star never changes direction suddenly.
-     Velocity carries momentum and is damped toward the motion of whatever
-     holds the star. A returning star is damped toward its orbit's own
-     motion (RETURN_DAMPING) and kept below MAX_RETURN_SPEED, so it glides
-     back and settles instead of snapping or overshooting. */
-  step(h) {
-    const { n, r, th, w, px, py, vx, vy, bond, homeOn, comet } = this;
-    const dtSec = h / 60;
-    const bm = CONFIG.BASE_MOTION;
-    const excite = 1 + 0.35 * this.local;
-    const loosen = (1 - 0.45 * this.local) * (1 - 0.6 * Math.min(1, this.damage));
-    const k0 = CONFIG.ORBIT_SPRING * loosen;
-    const stretch = CONFIG.STRETCH_AMOUNT;
-    const boundDamp = 1 - Math.pow(1 - CONFIG.boundDamping, h);
-    const freeDamp = 1 - Math.pow(1 - CONFIG.freeDrag, h);
-    const cometDamp = 1 - Math.pow(1 - CONFIG.cometDamping, h);
-    const retDamp = 1 - Math.pow(1 - CONFIG.RETURN_DAMPING, h);
-    const ease = 1 - Math.pow(1 - CONFIG.STEERING_SMOOTHNESS, h);
-    const vRet = CONFIG.MAX_RETURN_SPEED / 60;
-    const amax = CONFIG.particleMaxAcceleration;
-    const vmax = CONFIG.particleMaxSpeed;
-    const thr = CONFIG.INTERACTION_THRESHOLD;
-    const bw = view.halfW - 0.05;
-    const bh = view.halfH - 0.05;
-    const tt = state.time * 0.6;
-    const off = this.id * 3.1;
-    const gs = CONFIG.GAZE_RETURN_SPEED;
-    const slowness = 1 - smoothstep(gs * 0.8, gs, cursor.speed); // 1 = clearly below GAZE_RETURN_SPEED
-
-    for (let i = 0; i < n; i++) {
-      // its home: its own place on its own orbit, which keeps turning
-      th[i] += w[i] * dtSec * bm * excite;
-      const ri = r[i];
-      const c = Math.cos(th[i]);
-      const s = Math.sin(th[i]);
-      const ox = ri * c;
-      const oy = ri * s * this.flat;
-      const tx = this.x + ox * this.ca - oy * this.sa;
-      const ty = this.y + ox * this.sa + oy * this.ca;
-      const wv = (w[i] / 60) * bm * excite;
-      const dvx = -ri * s * wv;
-      const dvy = ri * c * this.flat * wv;
-      const tvx = dvx * this.ca - dvy * this.sa;
-      const tvy = dvx * this.sa + dvy * this.ca;
-
-      const x = px[i];
-      const y = py[i];
-      const hx = tx - x;
-      const hy = ty - y;
-      const hd = Math.hypot(hx, hy);
-      this.homeDist[i] = hd;
-      const a = bond[i];
-      const hOn = homeOn[i];
-
-      // ── holds ────────────────────────────────────────────────────────────
-      let ix = hx * k0 * a * a;
-      let iy = hy * k0 * a * a;
-      let refX = tvx * a;
-      let refY = tvy * a;
-      let damp = lerp(freeDamp, boundDamp, a);
-      let cm = comet[i] >= 0 ? cometById.get(comet[i]) : null;
-      if (comet[i] >= 0 && !cm) comet[i] = -1;
-      let hold = 0;
-      if (cm) {
-        // Its comet's hold eases in when it joins and fades as its own pull
-        // home wakes; stretched too far from its place, it lets go.
-        hold = smoothstep(0, 0.5, this.cAge[i]) * (1 - hOn) * (1 - hOn);
-        ix += (this.mtx[i] - x) * CONFIG.cometSpring * hold;
-        iy += (this.mty[i] - y) * CONFIG.cometSpring * hold;
-        refX = lerp(refX, cm.vx, hold);
-        refY = lerp(refY, cm.vy, hold);
-        damp = lerp(damp, cometDamp, hold);
-        if (hOn > 0.5 && Math.hypot(this.mtx[i] - x, this.mty[i] - y) > CONFIG.COMET_RELEASE_DISTANCE) {
-          leaveComet(cm, this, i);
-          cm = null;
-        }
-      }
-
-      // ── steering ─────────────────────────────────────────────────────────
-      let fx = 0;
-      let fy = 0;
-      cursorPullAt(x, y, FF);
-      const pw = lerp(0.5, stretch, a);
-      // (a star on its way home may pass the eye's clear zone to reach its orbit)
-      eyeAt(x, y, EYE, 1 - hOn);
-      const ew = 0.3 + 0.7 * (1 - a);
-      // A strong push from the cursor or the eye counts as meaningful interaction.
-      if (Math.hypot(FF.x, FF.y) * pw > thr || EYE.dir * ew > thr) this.quiet[i] = 0;
-      // Only a fast cursor taking hold of it calls back a star the eye sent home.
-      if (this.gazeHome[i] && cursor.speed >= CONFIG.GAZE_RETURN_SPEED && Math.hypot(FF.x, FF.y) * pw > thr) {
-        this.gazeHome[i] = 0;
-      }
-      // A star the eye sent home is let go by the eye, and by a slow cursor,
-      // as its pull home rises, so it really does head home.
-      const sent = this.gazeHome[i] ? hOn : 0;
-      const cw = pw * (1 - sent * slowness);
-      const gw = ew * (1 - sent);
-      fx += FF.x * cw + EYE.x * gw;
-      fy += FF.y * cw + EYE.y * gw;
-
-      const free = 1 - a;
-      if (free > 0.02) {
-        fx += this.ex[i] * free;
-        fy += this.ey[i] * free;
-        flowAt(x * 1.7 + off, y * 1.7, tt, FLOW);
-        fx += FLOW.x * CONFIG.turbulence * bm * free;
-        fy += FLOW.y * CONFIG.turbulence * bm * free;
-        if (this.kt[i] > 0) {
-          fx += this.kx[i];
-          fy += this.ky[i];
-          this.kt[i] -= dtSec;
-        }
-        /* ── Home attraction ───────────────────────────────────────────────
-           Weak, and only as awake as homeOn. It grows slightly with distance
-           so far-flung stars come back reliably, and eases out over the last
-           stretch so they arrive gently. */
-        if (hOn > 0.001 && hd > 1e-5) {
-          const pull = CONFIG.HOME_ATTRACTION * (1 + CONFIG.HOME_DISTANCE_SCALE * hd) * smoothstep(0, CONFIG.homeEaseRadius, hd);
-          fx += (hx / hd) * pull * hOn;
-          fy += (hy / hd) * pull * hOn;
-        }
-        if (hd > CONFIG.leash) {
-          const f = ((hd - CONFIG.leash) * 0.002) / hd;
-          fx += hx * f;
-          fy += hy * f;
-        }
-      }
-      if (x < -bw) fx += (-bw - x) * 0.006;
-      else if (x > bw) fx -= (x - bw) * 0.006;
-      if (y < -bh) fy += (-bh - y) * 0.006;
-      else if (y > bh) fy -= (y - bh) * 0.006;
-
-      // Gradual steering: the steering force eases toward its new value.
-      this.sax[i] += (fx - this.sax[i]) * ease;
-      this.say[i] += (fy - this.say[i]) * ease;
-      let ax = ix + this.sax[i];
-      let ay = iy + this.say[i];
-      const fa = Math.hypot(ax, ay);
-      if (fa > amax) {
-        ax *= amax / fa;
-        ay *= amax / fa;
-      }
-
-      // momentum, damped toward the motion of whatever holds it
-      let nvx = vx[i] + ax * h;
-      let nvy = vy[i] + ay * h;
-      nvx = refX + (nvx - refX) * (1 - damp);
-      nvy = refY + (nvy - refY) * (1 - damp);
-
-      /* Returning: damped toward its orbit's motion, and eased down to no
-         more than MAX_RETURN_SPEED, braking gradually rather than clamped in
-         one step. In a comet this grows as the comet's hold fades, so a star
-         turning for home slows, falls behind and drifts out of its comet. */
-      if (hOn > 0.001) {
-        const unheld = 1 - hold;
-        const rd = retDamp * hOn * unheld;
-        nvx = tvx + (nvx - tvx) * (1 - rd);
-        nvy = tvy + (nvy - tvy) * (1 - rd);
-        const rel = Math.hypot(nvx - tvx, nvy - tvy);
-        const cap = lerp(vmax, vRet, smoothstep(0, 0.6, hOn) * unheld);
-        if (rel > cap) {
-          const eased = Math.max(cap, rel - CONFIG.returnBrake * h);
-          nvx = tvx + ((nvx - tvx) * eased) / rel;
-          nvy = tvy + ((nvy - tvy) * eased) / rel;
-        }
-      }
-      // No force or damping may change its velocity faster than the
-      // acceleration limit: every turn and every brake takes a few frames.
-      const cdx = nvx - vx[i];
-      const cdy = nvy - vy[i];
-      const cd = Math.hypot(cdx, cdy);
-      if (cd > amax * h) {
-        nvx = vx[i] + (cdx * amax * h) / cd;
-        nvy = vy[i] + (cdy * amax * h) / cd;
-      }
-      const sp = Math.hypot(nvx, nvy);
-      if (sp > vmax) {
-        nvx *= vmax / sp;
-        nvy *= vmax / sp;
-      }
-      vx[i] = nvx;
-      vy[i] = nvy;
-      px[i] = x + nvx * h;
-      py[i] = y + nvy * h;
-    }
-  }
-
-  // Safety net: a system that ever goes non-finite is rebuilt in place.
-  guard() {
-    if (Number.isFinite(this.px[0] + this.py[0] + this.px[this.n - 1] + this.py[this.n - 1])) return;
-    releaseFromComets(this);
-    this.damage = 0;
-    this.placeOnOrbits();
-  }
+  P.col = new Uint8Array(cap);       // its own colour
+  P.ccol = new Uint8Array(cap);      // the colour it glows with after being in a comet
+  P.mode = new Uint8Array(cap);      // FLOCK, SCATTERED or IN_COMET
+  P.group = new Int32Array(cap).fill(-1); // its scatter group or comet
+  P.root = new Int32Array(cap);      // union-find parent: which clump it belongs to
+  P.next = new Int32Array(cap);      // spatial grid chain
 }
 
-let systems = [];
+// A new particle's look: the same mix of star colours, sizes and brightness.
+function dressParticle(i) {
+  P.col[i] = pickWeighted(CONFIG.colors.starWeights, Math.random());
+  P.size[i] = 0.6 + Math.pow(Math.random(), 3) * 1.5;
+  P.bright[i] = 0.5 + 0.5 * Math.random();
+}
 
-function createSystems() {
-  const rand = mulberry32(CONFIG.seed);
-  const rows = CONFIG.NUCLEUS_ROWS;
-  const cols = CONFIG.NUCLEUS_COLUMNS;
-  clearComets();
-  systems = [];
-  let id = 0;
-  for (let j = 0; j < rows; j++) {
-    for (let i = 0; i < cols; i++) {
-      const a = (i - (cols - 1) / 2) * CONFIG.longSpacing;
-      const b = (j - (rows - 1) / 2) * CONFIG.shortSpacing;
-      // 8 across on landscape screens; the same array turned upright on portrait ones
-      const x = view.portrait ? b : a;
-      const y = view.portrait ? a : b;
-      systems.push(new NucleusSystem(id++, x, y, rand));
-    }
+/* Several clumps of different sizes, spread across the screen. Each is a
+   sunflower-packed disc, about as tight as flocking holds a clump. Their
+   positions are also where the opening galaxy sends its stars. */
+function seedClumps() {
+  const n = Math.min(CONFIG.PARTICLE_COUNT, CONFIG.MAX_PARTICLES);
+  allocateParticles(n);
+  state.startCount = n;
+  state.spawned = 0;
+  const k = Math.max(1, CONFIG.CLUMP_COUNT);
+
+  // varied sizes, normalised to the total, none smaller than 2 % of it
+  const w = [];
+  for (let c = 0; c < k; c++) w.push(0.3 + Math.pow(Math.random(), 1.5) * 1.7);
+  const sum = w.reduce((a, b) => a + b, 0);
+  const min = Math.max(4, Math.floor(n * 0.02));
+  const sizes = w.map((v) => Math.max(min, Math.round((v / sum) * n)));
+  let excess = sizes.reduce((a, b) => a + b, 0) - n;
+  sizes.sort((a, b) => b - a);
+  for (let c = 0; excess !== 0; c = (c + 1) % k) {
+    if (excess > 0 && sizes[c] > min) { sizes[c]--; excess--; }
+    else if (excess < 0) { sizes[c]++; excess++; }
   }
-  allocateLoose();
+
+  // centres: best-candidate sampling, so clumps start well apart
+  const bw = view.halfW - 0.9;
+  const bh = view.halfH - 0.7;
+  const centres = [];
+  for (let c = 0; c < k; c++) {
+    let best = null;
+    let bestD = -1;
+    for (let t = 0; t < 30; t++) {
+      const x = (Math.random() * 2 - 1) * bw;
+      const y = (Math.random() * 2 - 1) * bh;
+      let d = Math.hypot(x, y) - 1.2; // keep the middle, where the eye wakes, clear
+      for (const q of centres) d = Math.min(d, Math.hypot(x - q.x, y - q.y));
+      if (d > bestD) { bestD = d; best = { x, y }; }
+    }
+    centres.push(best);
+  }
+
+  let i = 0;
+  sizes.forEach((size, c) => {
+    const { x: cx, y: cy } = centres[c];
+    const R = Math.sqrt(size) * CONFIG.SEPARATION_RADIUS * 0.55;
+    const turn = Math.random() * TAU;
+    const drift = Math.random() * 1000; // this clump's own drift
+    for (let j = 0; j < size; j++, i++) {
+      const r = R * Math.sqrt((j + 0.5) / size);
+      const a = turn + j * 2.399963; // the golden angle
+      P.x[i] = P.lx[i] = P.tx[i] = cx + r * Math.cos(a);
+      P.y[i] = P.ly[i] = P.ty[i] = cy + r * Math.sin(a);
+      P.vx[i] = P.vy[i] = 0;
+      dressParticle(i);
+      P.drift[i] = drift;
+      P.mode[i] = FLOCK;
+      P.group[i] = -1;
+      P.cool[i] = CONFIG.CLUMP_COOLDOWN;
+      P.cmix[i] = 0;
+    }
+  });
   state.clearTrails = true;
-  if (intro.phase === 'idle') initIntro();
-  else if (intro.phase === 'waking') finishIntro();
+}
+
+/* ── Spatial grid ─────────────────────────────────────────────────────────
+   Flocking particles are binned into cells as large as their neighbour
+   radius, so each one looks only at the nine cells around it. */
+const grid = { size: 0.25, cols: 1, rows: 1, x0: 0, y0: 0, head: new Int32Array(1) };
+
+function buildGrid(cell) {
+  grid.size = cell;
+  grid.x0 = -view.halfW - 2;
+  grid.y0 = -view.halfH - 2;
+  grid.cols = Math.max(1, Math.ceil((2 * view.halfW + 4) / cell));
+  grid.rows = Math.max(1, Math.ceil((2 * view.halfH + 4) / cell));
+  const cells = grid.cols * grid.rows;
+  if (grid.head.length < cells) grid.head = new Int32Array(cells);
+  grid.head.fill(-1, 0, cells);
+  for (let i = 0; i < P.n; i++) {
+    if (P.mode[i] !== FLOCK) continue;
+    const c = cellIndex(P.x[i], P.y[i]);
+    P.next[i] = grid.head[c];
+    grid.head[c] = i;
+  }
+}
+
+function cellIndex(x, y) {
+  const cx = clamp(Math.floor((x - grid.x0) / grid.size), 0, grid.cols - 1);
+  const cy = clamp(Math.floor((y - grid.y0) / grid.size), 0, grid.rows - 1);
+  return cy * grid.cols + cx;
+}
+
+function find(a) {
+  while (P.root[a] !== a) {
+    P.root[a] = P.root[P.root[a]];
+    a = P.root[a];
+  }
+  return a;
+}
+
+/* ── The slow wander current ──────────────────────────────────────────────
+   The same swirling curl flow as the opening galaxy's drift, broader and
+   slower. Nearby particles feel nearly the same push, so whole clumps
+   wander together; across a big clump it differs, so big clumps can split. */
+function wanderAt(x, y, out) {
+  const k = CONFIG.WANDER_SCALE / CONFIG.flowScale;
+  flowAt(x * k, y * k, (state.time * CONFIG.WANDER_RATE) / CONFIG.flowSpeed, out);
+}
+
+/* ── Clumps: boids ────────────────────────────────────────────────────────
+   Each flocking particle steers by its neighbours within NEIGHBOR_RADIUS:
+     separation  away from flockmates closer than SEPARATION_RADIUS
+     alignment   toward their average velocity
+     cohesion    toward their centre
+   plus the wander current, each clump's own random drift and soft screen
+   edges. Speeds are capped at
+   CLUMP_SPEED and a light drag keeps them hovering rather than rushing.
+   The same neighbour pairs link particles into clumps (union-find). */
+const NEIGHBOR_ORDER = [[0, 0], [1, 0], [0, 1], [-1, 0], [0, -1], [1, 1], [-1, 1], [-1, -1], [1, -1]];
+
+function flock(dt) {
+  const R = CONFIG.NEIGHBOR_RADIUS;
+  const R2 = R * R;
+  const S = CONFIG.SEPARATION_RADIUS;
+  const S2 = S * S;
+  const maxN = CONFIG.MAX_NEIGHBORS;
+  const vmax = CONFIG.CLUMP_SPEED;
+  const wSep = CONFIG.SEPARATION_WEIGHT * vmax * 4;
+  const wAli = CONFIG.ALIGNMENT_WEIGHT * 1.5;
+  const wCoh = CONFIG.COHESION_WEIGHT * 1.6;
+  const wWan = CONFIG.WANDER_WEIGHT * vmax * 0.9;
+  const wDrift = CONFIG.CLUMP_DRIFT_WEIGHT * vmax * 0.9;
+  const turn = state.time * CONFIG.CLUMP_DRIFT_TURN;
+  const bw = view.halfW - 0.35;
+  const bh = view.halfH - 0.35;
+  buildGrid(R);
+  for (let i = 0; i < P.n; i++) P.root[i] = i;
+
+  for (let i = 0; i < P.n; i++) {
+    if (P.mode[i] !== FLOCK) continue;
+    const xi = P.x[i];
+    const yi = P.y[i];
+    const gx = clamp(Math.floor((xi - grid.x0) / grid.size), 0, grid.cols - 1);
+    const gy = clamp(Math.floor((yi - grid.y0) / grid.size), 0, grid.rows - 1);
+    let sx = 0, sy = 0, avx = 0, avy = 0, cx = 0, cy = 0, cnt = 0;
+    const start = i % 8; // a rotating cell order, so a full neighbour list has no directional bias
+    scan: for (let q = 0; q < 9; q++) {
+      const o = NEIGHBOR_ORDER[q === 0 ? 0 : 1 + ((q - 1 + start) % 8)];
+      const xx = gx + o[0];
+      const yy = gy + o[1];
+      if (xx < 0 || yy < 0 || xx >= grid.cols || yy >= grid.rows) continue;
+      for (let j = grid.head[yy * grid.cols + xx]; j !== -1; j = P.next[j]) {
+        if (j === i) continue;
+        const dx = P.x[j] - xi;
+        const dy = P.y[j] - yi;
+        const d2 = dx * dx + dy * dy;
+        if (d2 > R2) continue;
+        // linked: the same clump
+        const ra = find(i);
+        const rb = find(j);
+        if (ra !== rb) P.root[ra] = rb;
+        cnt++;
+        avx += P.vx[j];
+        avy += P.vy[j];
+        cx += dx;
+        cy += dy;
+        if (d2 < S2 && d2 > 1e-10) {
+          const d = Math.sqrt(d2);
+          const push = (1 - d / S) / d;
+          sx -= dx * push;
+          sy -= dy * push;
+        }
+        if (cnt >= maxN) break scan;
+      }
+    }
+    let ax = 0;
+    let ay = 0;
+    if (cnt) {
+      ax += sx * wSep + (avx / cnt - P.vx[i]) * wAli + (cx / cnt) * wCoh;
+      ay += sy * wSep + (avy / cnt - P.vy[i]) * wAli + (cy / cnt) * wCoh;
+    }
+    wanderAt(xi, yi, FLOW);
+    ax += FLOW.x * wWan;
+    ay += FLOW.y * wWan;
+    // its clump's own random drift: a heading that wanders slowly, shared by the
+    // particles the clump was born with, so neighbouring clumps head different ways
+    const seed = P.drift[i];
+    const ang = seed * TAU + 2.2 * vnoise1(seed * 13.7 + turn);
+    ax += Math.cos(ang) * wDrift;
+    ay += Math.sin(ang) * wDrift;
+    if (xi < -bw) ax += (-bw - xi) * 2;
+    else if (xi > bw) ax -= (xi - bw) * 2;
+    if (yi < -bh) ay += (-bh - yi) * 2;
+    else if (yi > bh) ay -= (yi - bh) * 2;
+    P.ax[i] = ax;
+    P.ay[i] = ay;
+  }
+
+  const drag = Math.exp(-0.6 * dt);
+  for (let i = 0; i < P.n; i++) {
+    if (P.mode[i] !== FLOCK) continue;
+    let vx = (P.vx[i] + P.ax[i] * dt) * drag;
+    let vy = (P.vy[i] + P.ay[i] * dt) * drag;
+    const sp = Math.hypot(vx, vy);
+    if (sp > vmax) {
+      vx *= vmax / sp;
+      vy *= vmax / sp;
+    }
+    P.vx[i] = vx;
+    P.vy[i] = vy;
+    P.x[i] += vx * dt;
+    P.y[i] += vy * dt;
+  }
+}
+
+/* ── The hunt ─────────────────────────────────────────────────────────────
+   Any clump (MIN_CLUMP particles or more) with a particle inside the vision
+   cone scatters, unless it is still within its CLUMP_COOLDOWN. Also counts
+   the clumps for the overlay. */
+const census = { clumps: 0, strays: 0, sizes: [] };
+state.startCount = 0; // particles the field started with
+state.spawned = 0;    // particles added by clicks since
+
+function hunt() {
+  const cos = Math.cos((CONFIG.CONE_ANGLE * Math.PI) / 360);
+  const size = new Map();
+  const seen = new Set();
+  const guarded = new Set();
+  for (let i = 0; i < P.n; i++) {
+    if (P.mode[i] !== FLOCK) continue;
+    const r = find(i);
+    P.root[i] = r;
+    size.set(r, (size.get(r) || 0) + 1);
+    if (P.cool[i] > 0) guarded.add(r);
+    if (!seen.has(r) && inCone(P.x[i], P.y[i], cos)) seen.add(r);
+  }
+  census.clumps = 0;
+  census.strays = 0;
+  census.sizes = [];
+  for (const n of size.values()) {
+    if (n >= CONFIG.MIN_CLUMP) { census.clumps++; census.sizes.push(n); }
+    else census.strays += n;
+  }
+  census.sizes.sort((a, b) => b - a);
+
+  const prey = new Map();
+  for (const r of seen) if (!guarded.has(r) && size.get(r) >= CONFIG.MIN_CLUMP) prey.set(r, []);
+  if (!prey.size) return;
+  for (let i = 0; i < P.n; i++) {
+    if (P.mode[i] !== FLOCK) continue;
+    const list = prey.get(P.root[i]);
+    if (list) list.push(i);
+  }
+  for (const members of prey.values()) scatterClump(members);
 }
 
 /* ==========================================================================
-   Loose stars: they pull on one another, whatever their nucleus
+   Scatter, then fuse into a comet
    ========================================================================== */
 
-const loose = { n: 0, sys: null, idx: null, x: null, y: null, fx: null, fy: null };
-const lgrid = { size: 0.45, cols: 1, rows: 1, x0: 0, y0: 0, head: null, next: null };
+const scatterGroups = new Map(); // every bursting group: the eye's scatters and the fireworks
+let nextGroupId = 1;
+const events = { scatters: [], fusions: [], collisions: [], spawns: [] }; // times, for the overlay
+let flashes = [];
 
-function allocateLoose() {
-  const total = systems.length * CONFIG.PARTICLES_PER_NUCLEUS;
-  loose.sys = new Int32Array(total);
-  loose.idx = new Int32Array(total);
-  loose.x = new Float32Array(total);
-  loose.y = new Float32Array(total);
-  loose.fx = new Float32Array(total);
-  loose.fy = new Float32Array(total);
-  lgrid.next = new Int32Array(total);
+/* The eye's scatter: a soft version of the firework. The clump bursts
+   radially from its own centre, each particle at a slightly random speed and
+   angle, with a lean away from the eye (so the comet it fuses into flies
+   away from the eye). Lower speed and shorter streaks than a firework, and no
+   flash. */
+function scatterClump(members) {
+  const g = { id: nextGroupId++, kind: 'scatter', members, t: 0 };
+  let cx = 0, cy = 0;
+  for (const i of members) {
+    cx += P.x[i];
+    cy += P.y[i];
+  }
+  cx /= members.length;
+  cy /= members.length;
+  let ax = cx - eye.x;
+  let ay = cy - eye.y;
+  const al = Math.hypot(ax, ay) || 1;
+  ax /= al;
+  ay /= al;
+  const speed = CONFIG.SCATTER_FORCE;
+  for (const i of members) {
+    const [ux, uy] = burstDirection(P.x[i] - cx, P.y[i] - cy);
+    const sp = speed * (1 + (Math.random() * 2 - 1) * CONFIG.BURST_SPREAD);
+    P.vx[i] = P.vx[i] * 0.3 + ux * sp * 0.8 + ax * speed * 0.5;
+    P.vy[i] = P.vy[i] * 0.3 + uy * sp * 0.8 + ay * speed * 0.5;
+    P.mode[i] = SCATTERED;
+    P.group[i] = g.id;
+    P.trail[i] = CONFIG.SCATTER_TRAIL;
+  }
+  scatterGroups.set(g.id, g);
+  events.scatters.push(state.time);
 }
 
-function gridCell(x, y) {
-  const cx = clamp(Math.floor((x - lgrid.x0) / lgrid.size), 0, lgrid.cols - 1);
-  const cy = clamp(Math.floor((y - lgrid.y0) / lgrid.size), 0, lgrid.rows - 1);
-  return [cx, cy];
+// Outward from a centre, turned by a little random angle (a random direction at the very centre).
+function burstDirection(dx, dy) {
+  let d = Math.hypot(dx, dy);
+  let a;
+  if (d < 1e-4) a = Math.random() * TAU;
+  else a = Math.atan2(dy, dx);
+  a += (Math.random() * 2 - 1) * CONFIG.BURST_JITTER;
+  return [Math.cos(a), Math.sin(a)];
 }
 
-/* Every loose star (released, and not flying in a comet) attracts the loose
-   stars around it, from any nucleus, with a small cushion at very close
-   range. A star whose pull home is waking takes less part, so gatherings
-   loosen as their stars turn for home. When two loose stars from different
-   nuclei collide, they fuse into a new comet. */
-function interactLoose() {
-  const R = CONFIG.interactionRadius;
-  const R2 = R * R;
-  const G = CONFIG.PARTICLE_ATTRACTION;
-  const merge2 = CONFIG.COMET_MERGE_DISTANCE ** 2;
-
-  let n = 0;
-  for (let s = 0; s < systems.length; s++) {
-    const S = systems[s];
-    S.ex.fill(0);
-    S.ey.fill(0);
-    for (let i = 0; i < S.n; i++) {
-      if (!S.free[i] || S.bond[i] >= 0.2 || S.comet[i] >= 0) continue;
-      loose.sys[n] = s;
-      loose.idx[n] = i;
-      loose.x[n] = S.px[i];
-      loose.y[n] = S.py[i];
-      loose.fx[n] = 0;
-      loose.fy[n] = 0;
-      n++;
+/* Every bursting group flies apart under drag, then pulls back toward its
+   common centre with a damped spring that keeps the group's own drift.
+     · the eye's scatter, after SCATTER_TIME, pulls all the way in and fuses
+       into one comet (once gathered, or after FUSE_TIME)
+     · a firework, after BURST_TIME, gathers only to a clump-sized cluster and
+       becomes a new clump (once gathered, or after GATHER_TIME) */
+function updateScatter(dt) {
+  for (const g of scatterGroups.values()) {
+    g.t += dt;
+    const firework = g.kind === 'firework';
+    const flyTime = firework ? CONFIG.BURST_TIME : CONFIG.SCATTER_TIME;
+    const drag = Math.exp(-(firework ? CONFIG.BURST_DRAG : CONFIG.SCATTER_DRAG) * dt);
+    const k = firework ? CONFIG.GATHER_PULL : CONFIG.FUSE_PULL;
+    const damp = 2 * Math.sqrt(k) * 0.7;
+    const m = g.members;
+    let cx = 0, cy = 0, mvx = 0, mvy = 0;
+    for (const i of m) {
+      cx += P.x[i];
+      cy += P.y[i];
+      mvx += P.vx[i];
+      mvy += P.vy[i];
+    }
+    cx /= m.length;
+    cy /= m.length;
+    mvx /= m.length;
+    mvy /= m.length;
+    const pulling = g.t >= flyTime;
+    // a firework gathers into a clump, not a point
+    const hold = firework ? Math.sqrt(m.length) * CONFIG.SEPARATION_RADIUS * 0.6 : 0;
+    let far = 0;
+    let inside = 0;
+    for (const i of m) {
+      if (pulling) {
+        const dx = cx - P.x[i];
+        const dy = cy - P.y[i];
+        const d = Math.hypot(dx, dy);
+        const reach = d > hold && d > 1e-6 ? (d - hold) / d : 0;
+        P.vx[i] += (dx * reach * k - (P.vx[i] - mvx) * damp) * dt;
+        P.vy[i] += (dy * reach * k - (P.vy[i] - mvy) * damp) * dt;
+      } else {
+        P.vx[i] *= drag;
+        P.vy[i] *= drag;
+      }
+      P.x[i] += P.vx[i] * dt;
+      P.y[i] += P.vy[i] * dt;
+      const d2 = (P.x[i] - cx) ** 2 + (P.y[i] - cy) ** 2;
+      far = Math.max(far, d2);
+      if (d2 < (hold * 1.4) ** 2) inside++;
+    }
+    if (!pulling) continue;
+    if (firework) {
+      if (inside >= m.length * 0.9 || g.t >= flyTime + CONFIG.GATHER_TIME) formClump(g);
+    } else if (Math.sqrt(far) < 0.05 + cometRadius(m.length) || g.t >= flyTime + CONFIG.FUSE_TIME) {
+      formComet(g, cx, cy, mvx, mvy);
     }
   }
-  loose.n = n;
+}
 
-  lgrid.size = R;
-  lgrid.x0 = -view.halfW - 1;
-  lgrid.y0 = -view.halfH - 1;
-  lgrid.cols = Math.max(1, Math.ceil((2 * view.halfW + 2) / R));
-  lgrid.rows = Math.max(1, Math.ceil((2 * view.halfH + 2) / R));
-  const cells = lgrid.cols * lgrid.rows;
-  if (!lgrid.head || lgrid.head.length < cells) lgrid.head = new Int32Array(cells);
-  lgrid.head.fill(-1, 0, cells);
-  for (let k = 0; k < n; k++) {
-    const [cx, cy] = gridCell(loose.x[k], loose.y[k]);
-    const c = cy * lgrid.cols + cx;
-    lgrid.next[k] = lgrid.head[c];
-    lgrid.head[c] = k;
+// A firework's particles, gathered, become one new clump that resumes flocking.
+function formClump(g) {
+  const drift = Math.random() * 1000;
+  for (const i of g.members) {
+    P.mode[i] = FLOCK;
+    P.group[i] = -1;
+    P.trail[i] = 0;
+    P.cool[i] = CONFIG.CLUMP_COOLDOWN;
+    P.drift[i] = drift;
+    const sp = Math.hypot(P.vx[i], P.vy[i]);
+    if (sp > CONFIG.CLUMP_SPEED) {
+      P.vx[i] *= CONFIG.CLUMP_SPEED / sp;
+      P.vy[i] *= CONFIG.CLUMP_SPEED / sp;
+    }
   }
-  if (n < 2) return;
+  scatterGroups.delete(g.id);
+}
 
-  for (let a = 0; a < n; a++) {
-    const ax = loose.x[a];
-    const ay = loose.y[a];
-    const SA = systems[loose.sys[a]];
-    const ia = loose.idx[a];
-    const awakeA = SA.homeOn[ia];
-    const [cx, cy] = gridCell(ax, ay);
-    for (let oy = -1; oy <= 1; oy++) {
-      const yy = cy + oy;
-      if (yy < 0 || yy >= lgrid.rows) continue;
+/* ==========================================================================
+   Comets
+   --------------------------------------------------------------------------
+   A comet carries the particles it was fused from, hidden inside it. It
+   flies at COMET_SPEED in a straight line, bounces off the screen edges
+   with a little random turn (so no two paths lock into a loop), and trails
+   a glowing tail. Its size shows how many particles it holds. The eye does
+   not touch it. Two comets that collide disintegrate, and all of their
+   particles form one new slow clump at the point of impact.
+   ========================================================================== */
+
+let comets = [];
+let nextCometId = 1;
+let fadingComets = [];
+let embers = [];
+
+function cometRadius(n) {
+  return CONFIG.COMET_RADIUS * Math.sqrt(n);
+}
+
+// The gathered particles fuse; the comet flies on the way the group was drifting.
+function formComet(g, cx, cy, mvx, mvy) {
+  const n = g.members.length;
+  let sp = Math.hypot(mvx, mvy);
+  let ux;
+  let uy;
+  if (sp > 0.05) {
+    ux = mvx / sp;
+    uy = mvy / sp;
+  } else {
+    ux = cx - eye.x;
+    uy = cy - eye.y;
+    sp = Math.hypot(ux, uy) || 1;
+    ux /= sp;
+    uy /= sp;
+  }
+  const r = cometRadius(n);
+  const c = {
+    id: nextCometId++,
+    x: clamp(cx, -view.halfW + r, view.halfW - r),
+    y: clamp(cy, -view.halfH + r, view.halfH - r),
+    vx: ux * CONFIG.COMET_SPEED,
+    vy: uy * CONFIG.COMET_SPEED,
+    hx: ux,
+    hy: uy,
+    r,
+    cool: CONFIG.COMET_COOLDOWN,
+    members: g.members,
+    dead: false,
+  };
+  for (const i of g.members) {
+    P.mode[i] = IN_COMET;
+    P.group[i] = c.id;
+    P.trail[i] = 0;
+    P.ccol[i] = Math.random() < 0.6 ? 0 : 2;
+  }
+  comets.push(c);
+  scatterGroups.delete(g.id);
+  events.fusions.push(state.time);
+}
+
+function updateComets(dt) {
+  const jitter = (CONFIG.BOUNCE_JITTER * Math.PI) / 180;
+  const point = 1 - Math.exp(-dt / 0.07);
+  for (const c of comets) {
+    c.cool -= dt;
+    c.x += c.vx * dt;
+    c.y += c.vy * dt;
+    const bw = view.halfW - c.r;
+    const bh = view.halfH - c.r;
+    let bounced = false;
+    if (c.x < -bw) { c.x = -bw; c.vx = Math.abs(c.vx); bounced = true; }
+    else if (c.x > bw) { c.x = bw; c.vx = -Math.abs(c.vx); bounced = true; }
+    if (c.y < -bh) { c.y = -bh; c.vy = Math.abs(c.vy); bounced = true; }
+    else if (c.y > bh) { c.y = bh; c.vy = -Math.abs(c.vy); bounced = true; }
+    if (bounced) {
+      // a little random turn, but never back out through the edge
+      const a = (Math.random() * 2 - 1) * jitter;
+      let vx = c.vx * Math.cos(a) - c.vy * Math.sin(a);
+      let vy = c.vx * Math.sin(a) + c.vy * Math.cos(a);
+      if ((c.x <= -bw && vx < 0) || (c.x >= bw && vx > 0)) vx = -vx;
+      if ((c.y <= -bh && vy < 0) || (c.y >= bh && vy > 0)) vy = -vy;
+      const sp = Math.hypot(vx, vy) || 1;
+      c.vx = (vx / sp) * CONFIG.COMET_SPEED;
+      c.vy = (vy / sp) * CONFIG.COMET_SPEED;
+    }
+    // the head points along the motion; the tail swings round at a bounce
+    c.hx += (c.vx / CONFIG.COMET_SPEED - c.hx) * point;
+    c.hy += (c.vy / CONFIG.COMET_SPEED - c.hy) * point;
+    const hl = Math.hypot(c.hx, c.hy) || 1;
+    c.hx /= hl;
+    c.hy /= hl;
+    for (const i of c.members) {
+      P.x[i] = c.x;
+      P.y[i] = c.y;
+    }
+  }
+}
+
+/* Comet collisions through a coarse spatial hash: each comet is checked
+   only against comets in its own and the neighbouring cells. */
+function collideComets() {
+  if (comets.length < 2) return;
+  let maxR = 0;
+  for (const c of comets) maxR = Math.max(maxR, c.r);
+  const cell = Math.max(0.2, 2 * maxR);
+  const cells = new Map();
+  const key = (gx, gy) => gx * 4096 + gy;
+  for (const c of comets) {
+    const k = key(Math.floor(c.x / cell), Math.floor(c.y / cell));
+    if (!cells.has(k)) cells.set(k, []);
+    cells.get(k).push(c);
+  }
+  for (const a of comets) {
+    if (a.dead || a.cool > 0) continue;
+    const gx = Math.floor(a.x / cell);
+    const gy = Math.floor(a.y / cell);
+    search: for (let oy = -1; oy <= 1; oy++) {
       for (let ox = -1; ox <= 1; ox++) {
-        const xx = cx + ox;
-        if (xx < 0 || xx >= lgrid.cols) continue;
-        for (let b = lgrid.head[yy * lgrid.cols + xx]; b !== -1; b = lgrid.next[b]) {
-          if (b <= a) continue;
-          const dx = loose.x[b] - ax;
-          const dy = loose.y[b] - ay;
-          const d2 = dx * dx + dy * dy;
-          if (d2 >= R2 || d2 < 1e-10) continue;
-          const SB = systems[loose.sys[b]];
-          const ib = loose.idx[b];
-          const awakeB = SB.homeOn[ib];
-          const d = Math.sqrt(d2);
-          let f = (G * (1 - d / R)) / (d + 0.05);
-          if (d < 0.03) f -= 0.0006 * (1 - d / 0.03);
-          f *= (1 - awakeA) * (1 - awakeB);
-          const ux = (dx / d) * f;
-          const uy = (dy / d) * f;
-          loose.fx[a] += ux;
-          loose.fy[a] += uy;
-          loose.fx[b] -= ux;
-          loose.fy[b] -= uy;
-
-          // A collision of loose stars from different nuclei: a comet is born.
-          if (d2 < merge2 && SA !== SB && comets.length < CONFIG.COMET_MAX) {
-            if (
-              SA.comet[ia] < 0 && SB.comet[ib] < 0 &&
-              SA.cool[ia] <= 0 && SB.cool[ib] <= 0 &&
-              awakeA < 0.3 && awakeB < 0.3 &&
-              !SA.gazeHome[ia] && !SB.gazeHome[ib]
-            ) {
-              // The comet keeps its founders' average direction and speed.
-              const c = createComet((ax + loose.x[b]) / 2, (ay + loose.y[b]) / 2, [SA.vx[ia], SB.vx[ib]], [SA.vy[ia], SB.vy[ib]]);
-              joinComet(c, SA, ia);
-              joinComet(c, SB, ib);
-            }
+        const list = cells.get(key(gx + ox, gy + oy));
+        if (!list) continue;
+        for (const b of list) {
+          if (b === a || b.dead || b.cool > 0) continue;
+          if (Math.hypot(b.x - a.x, b.y - a.y) < a.r + b.r) {
+            disintegrate(a, b);
+            break search;
           }
         }
       }
     }
   }
-
-  const cap = 0.0025;
-  for (let k = 0; k < n; k++) {
-    let fx = loose.fx[k];
-    let fy = loose.fy[k];
-    const m = Math.hypot(fx, fy);
-    if (m > cap) {
-      fx *= cap / m;
-      fy *= cap / m;
-    }
-    const S = systems[loose.sys[k]];
-    S.ex[loose.idx[k]] = fx;
-    S.ey[loose.idx[k]] = fy;
-  }
+  comets = comets.filter((c) => !c.dead);
 }
 
-/* ==========================================================================
-   Comets: loose stars of different nuclei, fused while nothing calls them home
-   ========================================================================== */
-
-const HEAD = 0;
-const DUST = 1;
-const ION = 2;
-let comets = [];
-let nextCometId = 1;
-const cometById = new Map();
-
-/* A comet is born where two loose stars collide. It keeps their average
-   direction and their average speed, so it flies on as fast as they were
-   moving instead of slowing down. */
-function createComet(x, y, vxs, vys) {
-  let sx = 0;
-  let sy = 0;
-  let sp = 0;
-  for (let k = 0; k < vxs.length; k++) {
-    sx += vxs[k];
-    sy += vys[k];
-    sp += Math.hypot(vxs[k], vys[k]);
-  }
-  sp /= vxs.length;
-  let dl = Math.hypot(sx, sy);
-  if (dl < 1e-9) {
-    sx = gaze.x;
-    sy = gaze.y;
-    dl = 1;
-  }
-  const speed = clamp(sp, CONFIG.COMET_MIN_SPEED / 60, CONFIG.COMET_MAX_SPEED / 60);
-  const c = {
-    id: nextCometId++,
-    x, y,
-    speed,                                  // units per frame, kept for the comet's life
-    vx: (sx / dl) * speed,
-    vy: (sy / dl) * speed,
-    hx: sx / dl, hy: sy / dl,               // where its head points: along its motion
-    wx: sx / dl, wy: sy / dl,               // where it wants to go, eased
-    size: 0,                                // 0…1, grows with its stars
-    curve: Math.random() < 0.5 ? -1 : 1,    // which way the dust tail sweeps
-    members: [],
-    dead: false,
-  };
-  comets.push(c);
-  cometById.set(c.id, c);
-  return c;
+/* Two comets collide: a firework. Every particle of both bursts out
+   radially from the point of impact at about BURST_SPEED, each at a slightly
+   random speed and angle, trailing a short fading streak, while a flash
+   lights the impact. They slow under BURST_DRAG and after BURST_TIME gather
+   back into one new clump (see updateScatter), which the eye leaves alone for
+   CLUMP_COOLDOWN. No particle is created or lost. */
+function disintegrate(a, b) {
+  const members = a.members.concat(b.members);
+  const n = members.length;
+  const x = clamp((a.x * b.r + b.x * a.r) / (a.r + b.r), -view.halfW + 0.4, view.halfW - 0.4);
+  const y = clamp((a.y * b.r + b.y * a.r) / (a.r + b.r), -view.halfH + 0.4, view.halfH - 0.4);
+  // a little of the comets' shared momentum carries the whole burst
+  const mvx = ((a.vx * a.members.length + b.vx * b.members.length) / n) * 0.1;
+  const mvy = ((a.vy * a.members.length + b.vy * b.members.length) / n) * 0.1;
+  const g = { id: nextGroupId++, kind: 'firework', members, t: 0 };
+  const turn = Math.random() * TAU;
+  members.forEach((i, j) => {
+    const base = turn + j * 2.399963; // evenly round the circle …
+    const [ux, uy] = burstDirection(Math.cos(base), Math.sin(base)); // … then roughened
+    const sp = CONFIG.BURST_SPEED * (1 + (Math.random() * 2 - 1) * CONFIG.BURST_SPREAD);
+    P.x[i] = P.lx[i] = x + ux * 0.02;
+    P.y[i] = P.ly[i] = y + uy * 0.02;
+    P.vx[i] = ux * sp + mvx;
+    P.vy[i] = uy * sp + mvy;
+    P.mode[i] = SCATTERED;
+    P.group[i] = g.id;
+    P.trail[i] = CONFIG.TRAIL_LENGTH;
+    P.cmix[i] = 1; // they burst in the comet's colours, then fade to their own
+  });
+  scatterGroups.set(g.id, g);
+  flashes.push({ x, y, age: 0, life: CONFIG.BURST_FLASH, size: 0.35 + 0.5 * Math.min(1, Math.sqrt(n / 400)) });
+  retire(a, x, y);
+  retire(b, x, y);
+  events.collisions.push(state.time);
 }
 
-/* A star joins a comet with a role: part of the bright head, the broad gold
-   dust tail, or the narrow blue-violet ion tail. Joining is a strong
-   interaction: the star's quiet time starts again. */
-function joinComet(c, S, i) {
-  S.comet[i] = c.id;
-  S.cAge[i] = 0;
-  S.quiet[i] = 0;
-  let kind;
-  let t;
-  if (c.members.length < 6 || Math.random() < 0.12) {
-    kind = HEAD;
-    t = Math.random() * 0.05;
-  } else {
-    kind = Math.random() < 0.62 ? DUST : ION;
-    t = 0.06 + 0.94 * Math.pow(Math.random(), 1.25);
+/* ── Click to spawn ───────────────────────────────────────────────────────
+   A click adds a small new clump at the cursor, blooming out from the click.
+   It is safe from the eye for CLICK_COOLDOWN. This is the only way the total
+   ever changes: scattering, fusing and colliding never create or destroy a
+   particle. At MAX_PARTICLES a click does nothing (nor when there is room for
+   fewer than MIN_CLUMP, which would only be strays). Returns how many it added. */
+function spawnClump(x, y) {
+  const room = CONFIG.MAX_PARTICLES - P.n;
+  const [lo, hi] = CONFIG.CLICK_CLUMP_SIZE;
+  const n = Math.min(Math.round(lo + Math.random() * (hi - lo)), room);
+  if (n < CONFIG.MIN_CLUMP) return 0;
+  x = clamp(x, -view.halfW + 0.3, view.halfW - 0.3);
+  y = clamp(y, -view.halfH + 0.3, view.halfH - 0.3);
+  const R = Math.sqrt(n) * CONFIG.SEPARATION_RADIUS * 0.55;
+  const turn = Math.random() * TAU;
+  const drift = Math.random() * 1000;
+  for (let j = 0; j < n; j++) {
+    const i = P.n + j;
+    const u = Math.sqrt((j + 0.5) / n);
+    const a = turn + j * 2.399963;
+    P.x[i] = P.lx[i] = x + Math.cos(a) * R * u * 0.35;
+    P.y[i] = P.ly[i] = y + Math.sin(a) * R * u * 0.35;
+    P.vx[i] = Math.cos(a) * CONFIG.CLUMP_SPEED * (0.2 + 0.5 * u);
+    P.vy[i] = Math.sin(a) * CONFIG.CLUMP_SPEED * (0.2 + 0.5 * u);
+    dressParticle(i);
+    P.mode[i] = FLOCK;
+    P.group[i] = -1;
+    P.cool[i] = CONFIG.CLICK_COOLDOWN;
+    P.ccol[i] = 0;
+    P.cmix[i] = 0.7; // born bright, settling into its own colour
+    P.drift[i] = drift;
   }
-  if (kind === HEAD) S.ccol[i] = 0;
-  else if (kind === DUST) S.ccol[i] = Math.random() < 0.7 ? 2 : 0;
-  else S.ccol[i] = Math.random() < 0.7 ? 3 : 4;
-  c.members.push({ s: S, i, kind, t, lat: Math.random() + Math.random() - 1, ph: Math.random() * TAU });
-}
-
-// A star lets go of its comet, keeping its own momentum. Now and then it
-// sheds a spark as it goes, so a stretching comet frays into points.
-function leaveComet(c, S, i) {
-  S.comet[i] = -1;
-  S.cool[i] = CONFIG.cometCooldown;
-  c.members = c.members.filter((m) => !(m.s === S && m.i === i));
-  if (Math.random() < 0.35) {
+  P.n += n;
+  state.spawned += n;
+  events.spawns.push(state.time);
+  for (let k = 0; k < 6; k++) {
     const a = Math.random() * TAU;
-    const v = (CONFIG.emberScatter / 60) * (0.2 + 0.5 * Math.random());
-    spawnEmber(S.px[i], S.py[i], S.vx[i] * 0.5 + Math.cos(a) * v, S.vy[i] * 0.5 + Math.sin(a) * v, S.ccol[i], 0.8);
+    const v = CONFIG.emberScatter * (0.3 + 0.5 * Math.random());
+    spawnEmber(x, y, Math.cos(a) * v, Math.sin(a) * v, Math.random() < 0.6 ? 0 : 3, 0.7);
   }
+  return n;
 }
 
-/* A comet with too few stars left dissolves. Its stars carry on home, but
-   its glow does not vanish: it drifts on, fading and shrinking over
-   COMET_FADE_TIME, and it scatters into small sparks. */
-function dissolveComet(c, quietly = false) {
-  for (const m of c.members) {
-    m.s.comet[m.i] = -1;
-    m.s.cool[m.i] = CONFIG.cometCooldown;
-  }
-  c.members.length = 0;
+// A comet's glow does not vanish: it swells and fades, throwing off sparks.
+function retire(c, ix, iy) {
+  c.mass = c.members.length || 1;
+  c.members = [];
   c.dead = true;
-  cometById.delete(c.id);
-  if (quietly) return;
   c.fade = 1;
   fadingComets.push(c);
-  scatterComet(c);
+  const count = Math.round(2 + CONFIG.EMBER_COUNT * 0.5 * Math.min(1, c.mass / 400)); // the firework is the show; a few sparks only
+  const scatter = CONFIG.emberScatter;
+  for (let k = 0; k < count; k++) {
+    const a = Math.random() * TAU;
+    const v = scatter * (0.4 + Math.random());
+    const r = Math.random();
+    spawnEmber(ix, iy, Math.cos(a) * v + c.vx * 0.15, Math.sin(a) * v + c.vy * 0.15, r < 0.5 ? 0 : r < 0.85 ? 2 : 3, 0.7 + 0.6 * Math.random());
+  }
 }
-
-/* ── Sparks ───────────────────────────────────────────────────────────────
-   Small points a dissolving comet scatters into: from its head and all
-   along its tail, each drifting on with part of the comet's motion plus a
-   little outward scatter, shrinking and fading until it is gone. */
-let fadingComets = [];
-let embers = [];
 
 function spawnEmber(x, y, vx, vy, col, size) {
   if (embers.length >= CONFIG.emberMax) return;
@@ -1304,174 +1175,55 @@ function spawnEmber(x, y, vx, vy, col, size) {
   embers.push({ x, y, lx: x, ly: y, vx, vy, col, size: size * CONFIG.emberSize, age: 0, life: lerp(l0, l1, Math.random()) });
 }
 
-function scatterComet(c) {
-  const n = Math.round(CONFIG.EMBER_COUNT * (0.25 + 0.75 * c.size));
-  const L = CONFIG.COMET_TAIL_LENGTH * (0.35 + 0.65 * c.size);
-  const scatter = CONFIG.emberScatter / 60;
-  for (let k = 0; k < n; k++) {
-    const t = Math.pow(Math.random(), 1.6); // 0 = head … 1 = tail tip; more near the head
-    const side = (Math.random() - 0.5) * (0.06 + 0.3 * t) * L;
-    const x = c.x - c.hx * t * L - c.hy * side;
-    const y = c.y - c.hy * t * L + c.hx * side;
-    const a = Math.random() * TAU;
-    const v = scatter * (0.3 + 0.7 * Math.random());
-    const keep = 0.6 * (1 - t); // sparks near the head keep more of the comet's motion
-    const r = Math.random();
-    const col = t < 0.12 ? (r < 0.6 ? 0 : 2) : r < 0.55 ? 2 : r < 0.85 ? 3 : 4;
-    spawnEmber(x, y, c.vx * keep + Math.cos(a) * v, c.vy * keep + Math.sin(a) * v, col, (0.6 + 0.6 * Math.random()) * (t < 0.12 ? 1.3 : 1));
-  }
-}
-
 function updateFading(dt) {
-  const f = dt * 60;
-  const drag = Math.exp(-dt / 0.8);
+  const drag = Math.exp(-dt / 0.6);
   for (const c of fadingComets) {
     c.fade -= dt / CONFIG.COMET_FADE_TIME;
     c.vx *= drag;
     c.vy *= drag;
-    c.x += c.vx * f;
-    c.y += c.vy * f;
+    c.x += c.vx * dt * 0.2;
+    c.y += c.vy * dt * 0.2;
   }
   fadingComets = fadingComets.filter((c) => c.fade > 0);
-
   const edrag = Math.exp(-dt / 0.9);
   for (const e of embers) {
     e.age += dt;
     e.vx *= edrag;
     e.vy *= edrag;
-    e.x += e.vx * f;
-    e.y += e.vy * f;
+    e.x += e.vx * dt;
+    e.y += e.vy * dt;
   }
   embers = embers.filter((e) => e.age < e.life);
-}
-
-// Only for the safety net: take one system's stars out of every comet.
-function releaseFromComets(S) {
-  for (const c of comets) {
-    for (const m of c.members) if (m.s === S) S.comet[m.i] = -1;
-    c.members = c.members.filter((m) => m.s !== S);
-  }
+  for (const f of flashes) f.age += dt;
+  flashes = flashes.filter((f) => f.age < f.life);
 }
 
 function clearComets() {
-  for (const c of comets) if (!c.dead) dissolveComet(c, true);
   comets = [];
-  cometById.clear();
   fadingComets = [];
   embers = [];
+  flashes = [];
+  scatterGroups.clear();
+  for (const k of Object.keys(events)) events[k].length = 0;
 }
 
-/* ── Comet flight ─────────────────────────────────────────────────────────
-   Each comet keeps its speed and bends its path toward a blend of the
-   cursor (the strongest pull) and the eye's gaze. Where it wants to go is
-   itself eased (STEERING_SMOOTHNESS), and its turning rate is limited, so
-   its momentum carries it on in smooth curves. A comet has no timer: as
-   its stars' own pulls home wake up, the comet's hold on them fades, stars
-   from different nuclei stretch away in different directions, and the
-   comet thins out and dissolves on its own. */
-function updateComets(dt) {
-  const f = dt * 60;
-  const cap2 = CONFIG.COMET_CAPTURE_RADIUS ** 2;
-  const maxTurn = CONFIG.COMET_TURN_RATE * dt;
-  const ease = 1 - Math.pow(1 - CONFIG.STEERING_SMOOTHNESS, f);
-  const point = 1 - Math.exp(-dt / 0.08);
-  const bw = view.halfW - 0.3;
-  const bh = view.halfH - 0.3;
-
-  for (const c of comets) {
-    if (c.dead) continue;
-
-    // It gathers loose stars near its head, from any nucleus, unless they
-    // are already turning for home.
-    if (c.members.length < CONFIG.COMET_MAX_MEMBERS && loose.n) {
-      const [cx, cy] = gridCell(c.x, c.y);
-      for (let oy = -1; oy <= 1; oy++) {
-        const yy = cy + oy;
-        if (yy < 0 || yy >= lgrid.rows) continue;
-        for (let ox = -1; ox <= 1; ox++) {
-          const xx = cx + ox;
-          if (xx < 0 || xx >= lgrid.cols) continue;
-          for (let k = lgrid.head[yy * lgrid.cols + xx]; k !== -1; k = lgrid.next[k]) {
-            const S = systems[loose.sys[k]];
-            const i = loose.idx[k];
-            if (S.comet[i] >= 0 || S.cool[i] > 0 || S.homeOn[i] >= 0.3 || S.gazeHome[i]) continue;
-            const dx = S.px[i] - c.x;
-            const dy = S.py[i] - c.y;
-            if (dx * dx + dy * dy > cap2) continue;
-            joinComet(c, S, i);
-            if (c.members.length >= CONFIG.COMET_MAX_MEMBERS) break;
-          }
-        }
-      }
+// Cooldowns and comet colours fade for every particle outside a comet.
+function ageParticles(dt) {
+  const fade = 1 - Math.exp(-dt / CONFIG.starColourFade);
+  for (let i = 0; i < P.n; i++) {
+    if (P.cool[i] > 0) P.cool[i] -= dt;
+    if (P.mode[i] !== IN_COMET && P.cmix[i] > 0) {
+      P.cmix[i] *= 1 - fade;
+      if (P.cmix[i] < 0.01) P.cmix[i] = 0;
     }
-
-    // Where it wants to go: toward the cursor, nudged along the eye's gaze,
-    // and back toward the screen if it is about to leave it.
-    const dx = cursor.x - c.x;
-    const dy = cursor.y - c.y;
-    const dl = Math.hypot(dx, dy) || 1;
-    const wc = CONFIG.COMET_CURSOR_ATTRACTION * (0.3 + 0.7 * cursor.presence);
-    const wg = CONFIG.COMET_GAZE_INFLUENCE;
-    let tx = (dx / dl) * wc + gaze.x * wg;
-    let ty = (dy / dl) * wc + gaze.y * wg;
-    if (c.x < -bw) tx += (-bw - c.x) * 4;
-    else if (c.x > bw) tx -= (c.x - bw) * 4;
-    if (c.y < -bh) ty += (-bh - c.y) * 4;
-    else if (c.y > bh) ty -= (c.y - bh) * 4;
-    const tl = Math.hypot(tx, ty) || 1;
-    c.wx += (tx / tl - c.wx) * ease;
-    c.wy += (ty / tl - c.wy) * ease;
-
-    // Bend the velocity toward it, at a limited rate, keeping the speed.
-    const now = Math.atan2(c.vy, c.vx);
-    const want = Math.atan2(c.wy, c.wx);
-    const turn = clamp(Math.atan2(Math.sin(want - now), Math.cos(want - now)), -maxTurn, maxTurn);
-    const ang = now + turn;
-    c.vx = Math.cos(ang) * c.speed;
-    c.vy = Math.sin(ang) * c.speed;
-    c.x += c.vx * f;
-    c.y += c.vy * f;
-
-    // Its bright head points the way it is moving; the tail streams behind.
-    c.hx += (Math.cos(ang) - c.hx) * point;
-    c.hy += (Math.sin(ang) - c.hy) * point;
-    const hl = Math.hypot(c.hx, c.hy) || 1;
-    c.hx /= hl;
-    c.hy /= hl;
-
-    c.size += (Math.min(1, c.members.length / 30) - c.size) * (1 - Math.exp(-dt / 0.5));
-    if (c.members.length < 2) dissolveComet(c);
-    else layoutComet(c);
   }
-  comets = comets.filter((c) => !c.dead);
 }
 
-/* Each star's place in its comet: a bright concentrated head, a broad gold
-   dust tail sweeping to one side, and a long narrow blue-violet ion tail,
-   all streaming behind the head with a slow ripple. */
-function layoutComet(c) {
-  const L = CONFIG.COMET_TAIL_LENGTH * (0.35 + 0.65 * c.size);
-  const gx = c.hx;
-  const gy = c.hy;
-  const px = -gy;
-  const py = gx;
-  const t = state.time;
-  for (const m of c.members) {
-    let along;
-    let side;
-    if (m.kind === HEAD) {
-      along = m.t * L;
-      side = m.lat * 0.03;
-    } else if (m.kind === DUST) {
-      along = m.t * L;
-      side = m.lat * 0.34 * L * Math.pow(m.t, 0.8) + c.curve * 0.28 * L * m.t * m.t;
-    } else {
-      along = m.t * L * 1.25;
-      side = m.lat * 0.045 * L * m.t - c.curve * 0.06 * L * m.t;
-    }
-    side += 0.035 * m.t * Math.sin(t * 3 + m.t * 9 + m.ph);
-    m.s.mtx[m.i] = c.x - gx * along + px * side;
-    m.s.mty[m.i] = c.y - gy * along + py * side;
+function pruneEvents() {
+  const old = state.time - 10;
+  for (const k of Object.keys(events)) {
+    const a = events[k];
+    while (a.length && a[0] < old) a.shift();
   }
 }
 
@@ -1638,10 +1390,10 @@ function updateIris(dt) {
 const eyeball = { ox: 0, oy: 0, vx: 0, vy: 0, roll: 0, saccX: 0, saccY: 0, saccWait: 1.5 };
 
 function updateEyeball(dt) {
-  const d = Math.hypot(cursor.x, cursor.y);
-  const m = Math.sin(CONFIG.EYE_MAX_TURN * smoothstep(0.05, 2.6, d));
-  let tx = d > 1e-4 ? (cursor.x / d) * m : 0;
-  let ty = d > 1e-4 ? (cursor.y / d) * m : 0;
+  // The iris looks the way the eye is heading: fully while it hunts, a little less at rest.
+  const m = Math.sin(CONFIG.EYE_MAX_TURN * (0.55 + 0.45 * smoothstep(0, 1.5, eye.speed)));
+  let tx = eye.hx * m;
+  let ty = eye.hy * m;
 
   eyeball.saccWait -= dt;
   if (eyeball.saccWait <= 0) {
@@ -1682,15 +1434,16 @@ function resetEyeball() {
    ========================================================================== */
 
 function simulate(dt) {
-  for (const s of systems) s.updateState(dt);
-  interactLoose();
+  updateEye(dt);
+  updateArrows(dt);
+  ageParticles(dt);
+  flock(dt);
+  hunt();
+  updateScatter(dt);
   updateComets(dt);
+  collideComets();
   updateFading(dt);
-  const frames = dt * 60;
-  const steps = Math.max(1, Math.ceil(frames));
-  const h = frames / steps;
-  for (let k = 0; k < steps; k++) for (const s of systems) s.step(h);
-  for (const s of systems) s.guard();
+  pruneEvents();
   updateIris(dt);
   updateEyeball(dt);
 }
@@ -1721,33 +1474,35 @@ function render(dt) {
   ctx.fillStyle = `rgb(${CONFIG.trailBlackPoint}, ${CONFIG.trailBlackPoint}, ${CONFIG.trailBlackPoint})`;
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 
+  if (state.showVectors && intro.phase === 'done') drawArrows();
+
   ctx.globalCompositeOperation = 'lighter';
   ctx.setTransform(s, 0, 0, s, ox, oy);
   if (intro.glow > 0.001) drawIntroGlow();
   drawComets();
+  drawFlashes();
   ctx.setTransform(1, 0, 0, 1, 0, 0);
+  drawStreaks();
   drawStars();
   drawEmbers();
 
+  // the eye, wherever it has got to (condensing out of the galaxy at first)
   ctx.setTransform(s, 0, 0, s, ox, oy);
-  drawNuclei();
   ctx.globalCompositeOperation = 'source-over';
-  if (intro.eye >= 1) drawEye();
-  else if (intro.eye > 0.001) {
-    // the eye condensing out of the galaxy's core
+  if (intro.eye > 0.001) {
     ctx.save();
-    ctx.scale(intro.eye, intro.eye);
+    ctx.translate(eye.x, eye.y);
+    if (intro.eye < 1) ctx.scale(intro.eye, intro.eye);
     drawEye();
     ctx.restore();
   }
-  if (state.showVectors) drawVectors();
   drawCursor();
+  if (state.debug) drawDebug();
 }
 
 /* ── Star trails ──────────────────────────────────────────────────────────
    The trail layer fades a little every frame, and each particle draws a
-   thin line into it from where it was to where it is. Together they leave
-   soft, luminous streaks that lengthen with energy. */
+   thin line into it from where it was to where it is. */
 const trailPaths = [];
 
 function drawTrails(dt) {
@@ -1768,24 +1523,25 @@ function drawTrails(dt) {
   }
 
   for (let c = 0; c < starColours.length; c++) trailPaths[c] = new Path2D();
-  for (const S of systems) {
-    const { px, py, lx, ly, col, ccol } = S;
-    for (let i = 0; i < S.n; i++) {
-      const x = tox + px[i] * ts;
-      const y = toy + py[i] * ts;
-      const x0 = tox + lx[i] * ts;
-      const y0 = toy + ly[i] * ts;
-      lx[i] = px[i];
-      ly[i] = py[i];
-      const seg = Math.abs(x - x0) + Math.abs(y - y0);
-      if (seg > 0.3 && seg < ts * 1.2) {
-        const p = trailPaths[S.cmix[i] > 0.5 ? ccol[i] : col[i]];
-        p.moveTo(x0, y0);
-        p.lineTo(x, y);
-      }
+  for (let i = 0; i < P.n; i++) {
+    if (P.mode[i] === IN_COMET || P.trail[i] > 0) {
+      P.lx[i] = P.x[i]; // inside a comet, or bursting (it draws its own streak instead)
+      P.ly[i] = P.y[i];
+      continue;
+    }
+    const x = tox + P.x[i] * ts;
+    const y = toy + P.y[i] * ts;
+    const x0 = tox + P.lx[i] * ts;
+    const y0 = toy + P.ly[i] * ts;
+    P.lx[i] = P.x[i];
+    P.ly[i] = P.y[i];
+    const seg = Math.abs(x - x0) + Math.abs(y - y0);
+    if (seg > 0.3 && seg < ts * 1.2) {
+      const p = trailPaths[P.cmix[i] > 0.5 ? P.ccol[i] : P.col[i]];
+      p.moveTo(x0, y0);
+      p.lineTo(x, y);
     }
   }
-
   // sparks leave faint streaks too
   for (const e of embers) {
     const x = tox + e.x * ts;
@@ -1810,39 +1566,80 @@ function drawTrails(dt) {
   }
 }
 
-/* The star heads: small glowing points drawn fresh every frame. Loose stars
-   flare slightly; stars flying in a comet take the comet's colours, and
-   cross-fade back to their own when they let go. */
+/* ── Burst streaks ─────────────────────────────────────────────────────────
+   A bursting particle draws its own short streak back along its motion:
+   TRAIL_LENGTH seconds of it for a firework, SCATTER_TRAIL for the eye's
+   softer scatter. It fades toward the tail in three steps and shortens as
+   drag slows the particle, until it is gone. */
+const STREAK_STEPS = 3;
+const streakPaths = [];
+
+function drawStreaks() {
+  const s = view.dpr * view.cell;
+  const ox = view.dpr * view.cx;
+  const oy = view.dpr * view.cy;
+  streakPaths.length = 0;
+  let any = false;
+  for (let i = 0; i < P.n; i++) {
+    if (P.mode[i] !== SCATTERED || P.trail[i] <= 0) continue;
+    const vx = P.vx[i];
+    const vy = P.vy[i];
+    if (vx * vx + vy * vy < 0.15 * 0.15) continue;
+    const col = P.cmix[i] > 0.5 ? P.ccol[i] : P.col[i];
+    const x = ox + P.x[i] * s;
+    const y = oy + P.y[i] * s;
+    const dx = (-vx * P.trail[i] * s) / STREAK_STEPS;
+    const dy = (-vy * P.trail[i] * s) / STREAK_STEPS;
+    for (let l = 0; l < STREAK_STEPS; l++) {
+      const k = col * STREAK_STEPS + l;
+      const p = streakPaths[k] || (streakPaths[k] = new Path2D());
+      p.moveTo(x + dx * l, y + dy * l);
+      p.lineTo(x + dx * (l + 1), y + dy * (l + 1));
+    }
+    any = true;
+  }
+  if (!any) return;
+  ctx.lineCap = 'round';
+  ctx.lineWidth = Math.max(1, 1.3 * view.dpr);
+  for (let k = 0; k < streakPaths.length; k++) {
+    if (!streakPaths[k]) continue;
+    const c = Math.floor(k / STREAK_STEPS);
+    const l = k % STREAK_STEPS;
+    ctx.strokeStyle = `rgba(${starColours[c]}, ${0.55 * (1 - l / STREAK_STEPS) * intro.starVis})`;
+    ctx.stroke(streakPaths[k]);
+  }
+}
+
+/* The star heads: small glowing points drawn fresh every frame. Scattered
+   particles flare a little; particles fresh from a comet glow in its
+   colours and cross-fade back to their own. */
 function drawStars() {
   const s = view.dpr * view.cell;
   const ox = view.dpr * view.cx;
   const oy = view.dpr * view.cy;
   const size = (CONFIG.PARTICLE_SIZE * s) / STAR_CORE;
   const base = CONFIG.starOpacity * intro.starVis;
-  for (const S of systems) {
-    const { px, py, col, ccol, cmix, bright, bond } = S;
-    for (let i = 0; i < S.n; i++) {
-      const m = cmix[i];
-      const a = Math.min(1, bright[i] * base * lerp(1 + 0.3 * (1 - bond[i]), 1.3, m));
-      const r = size * S.size[i] * (1 + 0.1 * m);
-      const x = ox + px[i] * s - r;
-      const y = oy + py[i] * s - r;
-      if (m < 0.02) {
-        ctx.globalAlpha = a;
-        ctx.drawImage(starSprites[col[i]], x, y, 2 * r, 2 * r);
-      } else if (m > 0.98) {
-        ctx.globalAlpha = a;
-        ctx.drawImage(starSprites[ccol[i]], x, y, 2 * r, 2 * r);
-      } else {
-        ctx.globalAlpha = a * (1 - m);
-        ctx.drawImage(starSprites[col[i]], x, y, 2 * r, 2 * r);
-        ctx.globalAlpha = a * m;
-        ctx.drawImage(starSprites[ccol[i]], x, y, 2 * r, 2 * r);
-      }
+  for (let i = 0; i < P.n; i++) {
+    const mode = P.mode[i];
+    if (mode === IN_COMET) continue;
+    const m = P.cmix[i];
+    const a = Math.min(1, P.bright[i] * base * (mode === SCATTERED ? 1.3 : 1) * (1 + 0.3 * m));
+    const r = size * P.size[i] * (1 + 0.1 * m);
+    const x = ox + P.x[i] * s - r;
+    const y = oy + P.y[i] * s - r;
+    if (m < 0.02) {
+      ctx.globalAlpha = a;
+      ctx.drawImage(starSprites[P.col[i]], x, y, 2 * r, 2 * r);
+    } else {
+      ctx.globalAlpha = a * (1 - m);
+      ctx.drawImage(starSprites[P.col[i]], x, y, 2 * r, 2 * r);
+      ctx.globalAlpha = a * m;
+      ctx.drawImage(starSprites[P.ccol[i]], x, y, 2 * r, 2 * r);
     }
   }
   ctx.globalAlpha = 1;
 }
+
 
 // Sparks: they ease in, then shrink and fade over their short lives.
 function drawEmbers() {
@@ -1860,14 +1657,37 @@ function drawEmbers() {
   ctx.globalAlpha = 1;
 }
 
+/* ── Impact flash ──────────────────────────────────────────────────────────
+   Where two comets collide: a bright core that swells and fades over
+   BURST_FLASH, a soft halo, and a thin shock ring racing outward ahead of
+   the burst. (The eye's scatter has none.) */
+function drawFlashes() {
+  for (const f of flashes) {
+    const u = f.age / f.life;
+    const a = (1 - u) * (1 - u);
+    const r = f.size * (0.5 + 1.2 * Math.sqrt(u));
+    ctx.globalAlpha = a;
+    ctx.drawImage(cometHeadSprite, f.x - r, f.y - r, 2 * r, 2 * r);
+    const h = r * 2.6;
+    ctx.globalAlpha = a * 0.9;
+    ctx.drawImage(haloSprite, f.x - h, f.y - h, 2 * h, 2 * h);
+    ctx.globalAlpha = a * 0.55;
+    ctx.strokeStyle = 'rgb(255, 238, 205)';
+    ctx.lineWidth = (0.6 + 1.8 * (1 - u)) * PX;
+    ctx.beginPath();
+    ctx.arc(f.x, f.y, f.size * 0.3 + CONFIG.BURST_SPEED * f.age * 0.6, 0, TAU);
+    ctx.stroke();
+  }
+  ctx.globalAlpha = 1;
+}
+
 /* ── Comets ─────────────────────────────────────────────────────────────────
    After the comet photograph: a small, intensely bright head; a broad gold
-   dust tail sweeping to one side; a long, narrow blue ion tail with a violet
-   fringe. All of it streams away from the direction of flight, and it grows
-   with the number of stars the comet has gathered. */
+   dust fan; a long, narrow blue ion tail with a violet fringe, all streaming
+   opposite the motion. Head and tail grow with the particles inside. A
+   comet that collides swells a little as its glow fades away. */
 function drawComets() {
   for (const c of comets) drawComet(c, 1);
-  // dissolving comets: fading, shrinking, drifting on
   for (const c of fadingComets) {
     const v = Math.max(0, c.fade);
     drawComet(c, v * v * (3 - 2 * v));
@@ -1876,73 +1696,28 @@ function drawComets() {
 }
 
 function drawComet(c, vis) {
-  const k = c.size * (0.45 + 0.55 * vis); // a dissolving comet shrinks as it fades
-  if (k < 0.02) return;
-  const L = CONFIG.COMET_TAIL_LENGTH * (0.35 + 0.65 * k);
+  const n = c.members.length || c.mass || 1;
+  const k = Math.min(1, Math.sqrt(n / 400)); // size: 400 particles is a full-grown comet
+  const L = CONFIG.COMET_TAIL * (0.3 + 0.7 * k) * (0.5 + 0.5 * vis);
   const back = Math.atan2(-c.hy, -c.hx);
   const tail = (sprite, angle, len, width, alpha) => {
     ctx.save();
     ctx.translate(c.x, c.y);
     ctx.rotate(back + angle);
-    ctx.globalAlpha = alpha * k * vis;
+    ctx.globalAlpha = alpha * (0.5 + 0.5 * k) * vis;
     ctx.drawImage(sprite, 0, -width / 2, len, width);
     ctx.restore();
   };
-  // broad gold dust fan, with a brighter, whiter core near the head
-  tail(tailSprites.dust, -c.curve * 0.2, L * 1.05, L * 0.78, 0.5);
-  tail(tailSprites.dust, -c.curve * 0.12, L * 0.8, L * 0.38, 0.45);
-  tail(tailSprites.head, -c.curve * 0.08, L * 0.55, L * 0.2, 0.45);
-  // long narrow blue ion tail with a violet fringe
-  tail(tailSprites.violet, c.curve * 0.1, L * 1.3, L * 0.26, 0.38);
-  tail(tailSprites.ion, c.curve * 0.05, L * 1.5, L * 0.1, 0.75);
-  // a small, intensely bright head
-  const hr = (0.06 + 0.1 * k) * (0.25 + 0.75 * vis);
+  tail(tailSprites.dust, -0.1, L * 1.0, L * 0.6, 0.5);
+  tail(tailSprites.head, -0.04, L * 0.55, L * 0.2, 0.5);
+  tail(tailSprites.violet, 0.05, L * 1.25, L * 0.22, 0.38);
+  tail(tailSprites.ion, 0.02, L * 1.45, L * 0.09, 0.75);
+  const hr = (0.04 + c.r * 1.5) * (1 + 0.6 * (1 - vis));
   ctx.globalAlpha = vis;
   ctx.drawImage(cometHeadSprite, c.x - hr, c.y - hr, hr * 2, hr * 2);
   ctx.drawImage(cometHeadSprite, c.x - hr * 0.4, c.y - hr * 0.4, hr * 0.8, hr * 0.8);
 }
 
-/* ── Nuclei ─────────────────────────────────────────────────────────────────
-   Each nucleus is a small star: a white-gold core with a soft glow, a faint
-   blue halo and fine diffraction spikes. It dims while its system is
-   scattered and brightens again as it rebuilds. */
-function drawNuclei() {
-  const g = CONFIG.GLOW_STRENGTH;
-  const t = state.time;
-  ctx.globalCompositeOperation = 'lighter';
-  ctx.lineCap = 'round';
-  ctx.strokeStyle = `rgb(${CONFIG.colors.nucleus})`;
-  ctx.fillStyle = '#fff';
-  ctx.lineWidth = 0.7 * PX;
-  for (const s of systems) {
-    if (s.appear <= 0.001) continue; // asleep in the opening galaxy
-    const whole = s.shown;
-    const b = g * (0.35 + 0.65 * whole) * (0.85 + 0.15 * Math.sin(t * 1.3 + s.twinkle)) * (1 + 0.35 * s.local) * s.appear;
-
-    ctx.globalAlpha = 0.5 * b * whole;
-    const hr = 0.3;
-    ctx.drawImage(haloSprite, s.x - hr, s.y - hr, 2 * hr, 2 * hr);
-
-    ctx.globalAlpha = Math.min(1, 0.9 * b);
-    const nr = 0.1 * (0.75 + 0.25 * whole);
-    ctx.drawImage(nucleusSprite, s.x - nr, s.y - nr, 2 * nr, 2 * nr);
-
-    const len = 0.08 * (0.45 + 0.55 * whole);
-    ctx.globalAlpha = 0.35 * b;
-    ctx.beginPath();
-    ctx.moveTo(s.x - len, s.y);
-    ctx.lineTo(s.x + len, s.y);
-    ctx.moveTo(s.x, s.y - len);
-    ctx.lineTo(s.x, s.y + len);
-    ctx.stroke();
-
-    ctx.globalAlpha = Math.min(1, b);
-    ctx.beginPath();
-    ctx.arc(s.x, s.y, 1.5 * PX, 0, TAU);
-    ctx.fill();
-  }
-  ctx.globalAlpha = 1;
-}
 
 /* ── The cosmic eyeball ───────────────────────────────────────────────────────
    Fixed at the centre; only the eyeball turns. A galactic glow surrounds it,
@@ -2154,40 +1929,149 @@ function drawSparseRings(f, R) {
 
 /* ---- V: the vector field that drives the particles ------------------------ */
 
-function drawVectors() {
-  const sp = CONFIG.vectorSpacing;
-  const x0 = Math.ceil(-view.halfW / sp) * sp;
-  const y0 = Math.ceil(-view.halfH / sp) * sp;
-  const calm = new Path2D();
-  const strong = new Path2D();
-  for (let y = y0; y < view.halfH; y += sp) {
-    for (let x = x0; x < view.halfW; x += sp) {
-      if (Math.hypot(x, y) < CONFIG.eyeClearRadius) continue;
-      fieldAt(x, y, FF);
-      const m = Math.hypot(FF.x, FF.y);
-      if (m < 1e-8) continue;
-      const q = Math.min(1, Math.sqrt(m / CONFIG.vectorReference));
-      const len = CONFIG.vectorLength * (0.18 + 0.82 * q);
-      const ux = FF.x / m;
-      const uy = FF.y / m;
-      const path = q > 0.8 ? strong : calm;
-      const tx = x + ux * len * 0.5;
-      const ty = y + uy * len * 0.5;
-      path.moveTo(x - ux * len * 0.5, y - uy * len * 0.5);
-      path.lineTo(tx, ty);
-      const hl = Math.min(0.06, len * 0.35);
-      path.moveTo(tx - (ux * 0.9 - uy * 0.45) * hl, ty - (uy * 0.9 + ux * 0.45) * hl);
-      path.lineTo(tx, ty);
-      path.lineTo(tx - (ux * 0.9 + uy * 0.45) * hl, ty - (uy * 0.9 - ux * 0.45) * hl);
+/* ── Vector field arrows (V) ──────────────────────────────────────────────
+   A grid of arrows, one every ARROW_SPACING pixels, showing the eye's force
+   where it is active:
+     · inside the vision cone, pushed away from the eye
+     · behind the eye, its wake, drawn back toward it
+     · elsewhere there is no force, and no arrow
+   Length (ARROW_MIN_LENGTH … ARROW_MAX_LENGTH) and opacity (up to
+   ARROW_OPACITY) grow with the force: near the eye, and with cursor speed.
+   An arrow grows quickly as the eye's force arrives (ARROW_RISE) and eases
+   back over ARROW_EASE seconds. The whole field starts hidden, fades in over
+   ARROW_FADE seconds once the cursor moves the eye, and fades back out to
+   nothing when the cursor stops. (A picture of the eye's reach: its only
+   real effect is still to scatter the clumps inside its cone.) */
+const arrows = { n: 0, cols: 0, rows: 0, w: 0, h: 0, spacing: 0, vis: 0, px: null, py: null, x: null, y: null, ax: null, ay: null };
+const EF = { x: 0, y: 0 };
+
+function layoutArrows() {
+  const sp = CONFIG.ARROW_SPACING;
+  const cols = Math.max(1, Math.floor(view.w / sp));
+  const rows = Math.max(1, Math.floor(view.h / sp));
+  const n = cols * rows;
+  Object.assign(arrows, { n, cols, rows, w: view.w, h: view.h, spacing: sp });
+  for (const k of ['px', 'py', 'x', 'y', 'ax', 'ay']) arrows[k] = new Float32Array(n);
+  const x0 = (view.w - (cols - 1) * sp) / 2;
+  const y0 = (view.h - (rows - 1) * sp) / 2;
+  for (let r = 0, j = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++, j++) {
+      arrows.px[j] = x0 + c * sp; // screen position (CSS pixels)
+      arrows.py[j] = y0 + r * sp;
+      arrows.x[j] = (arrows.px[j] - view.cx) / view.cell; // world position
+      arrows.y[j] = (arrows.py[j] - view.cy) / view.cell;
     }
   }
-  ctx.lineWidth = 0.8 * PX;
-  ctx.strokeStyle = `rgb(${CONFIG.colors.ui})`;
-  ctx.globalAlpha = 0.3;
-  ctx.stroke(calm);
-  ctx.globalAlpha = 0.65;
-  ctx.stroke(strong);
-  ctx.globalAlpha = 1;
+}
+
+// The eye's force at a point: direction and strength (0…1) in out.x/out.y.
+// Strongest at the eyeball's rim, the closest point the arrows show.
+function eyeFieldAt(x, y, out) {
+  const L = CONFIG.CONE_LENGTH;
+  const R = CONFIG.EYEBALL_RADIUS;
+  const dx = x - eye.x;
+  const dy = y - eye.y;
+  const d = Math.hypot(dx, dy) + 1e-6;
+  const ux = dx / d;
+  const uy = dy / d;
+  const rim = Math.max(0, d - R); // distance beyond the eyeball
+  const facing = ux * eye.hx + uy * eye.hy;
+  const cosHalf = Math.cos((CONFIG.CONE_ANGLE * Math.PI) / 360);
+  const energy = state.cursorEnergy; // how fast the cursor is moving, 0…1
+  const pace = Math.min(1, (2 * eye.speed) / CONFIG.EYE_MAX_SPEED); // how fast the eye is moving
+  // inside the cone: pushed away, strongest close to the eye; a faint hint even
+  // at rest, since the cone still hunts
+  const inside = smoothstep(cosHalf - 0.03, cosHalf + 0.015, facing) * (1 - smoothstep(L * 0.85, L, d));
+  const push = inside * (1 / (1 + (rim / Math.max(0.1, (L - R) * 0.6)) ** 2)) * (0.15 + 0.85 * energy);
+  // behind: the wake, drawn back toward the eye while it moves
+  const behind = smoothstep(0.25, 0.85, -facing);
+  const wake = behind * (1 / (1 + (rim / CONFIG.ARROW_WAKE_REACH) ** 2)) * pace * (0.25 + 0.75 * energy);
+  out.x = ux * (push - wake);
+  out.y = uy * (push - wake);
+}
+
+// Hidden again: on reset, and whenever V turns the arrows on or off.
+function resetArrows() {
+  arrows.vis = 0;
+  if (arrows.n) {
+    arrows.ax.fill(0);
+    arrows.ay.fill(0);
+  }
+}
+
+function updateArrows(dt) {
+  if (!state.showVectors) return;
+  if (arrows.w !== view.w || arrows.h !== view.h || arrows.spacing !== CONFIG.ARROW_SPACING) layoutArrows();
+  // the whole field fades in while the cursor moves the eye, and out when it stops
+  const moving = smoothstep(0.04, 0.12, state.cursorEnergy);
+  const fade = dt / Math.max(0.01, CONFIG.ARROW_FADE);
+  arrows.vis += clamp(moving - arrows.vis, -fade, fade);
+  const up = 1 - Math.exp(-dt / CONFIG.ARROW_RISE);
+  const down = 1 - Math.exp(-dt / CONFIG.ARROW_EASE);
+  for (let j = 0; j < arrows.n; j++) {
+    eyeFieldAt(arrows.x[j], arrows.y[j], EF);
+    // quick to grow as the eye's force arrives, slow to ease back
+    const k = Math.hypot(EF.x, EF.y) > Math.hypot(arrows.ax[j], arrows.ay[j]) ? up : down;
+    arrows.ax[j] += (EF.x - arrows.ax[j]) * k;
+    arrows.ay[j] += (EF.y - arrows.ay[j]) * k;
+  }
+}
+
+// Each arrow is one filled shape (a shaft and a clear triangular head), so the
+// head never doubles up where it meets the shaft. Batched by opacity.
+const ARROW_LEVELS = 10;
+function drawArrows() {
+  const vis = smoothstep(0, 1, arrows.vis);
+  if (!arrows.n || vis < 0.005) return;
+  const paths = [];
+  const minL = CONFIG.ARROW_MIN_LENGTH;
+  const maxL = Math.max(minL, CONFIG.ARROW_MAX_LENGTH);
+  const w = CONFIG.ARROW_WIDTH / 2;
+  for (let j = 0; j < arrows.n; j++) {
+    const ax = arrows.ax[j];
+    const ay = arrows.ay[j];
+    const mag = Math.hypot(ax, ay);
+    if (mag < 1e-4) continue;
+    const ux = ax / mag;
+    const uy = ay / mag;
+    // where the eye's force is weak or absent, the arrow fades to nothing
+    const s = Math.min(1, mag);
+    const q = smoothstep(0.05, 0.5, s);
+    if (q < 0.02) continue;
+    const len = minL + (maxL - minL) * s;
+    const hl = Math.min(5.6 * w * 2, Math.max(3.4 * w * 2, len * 0.3)); // head length
+    const hw = hl * 0.6; // head half-width
+    const cx = arrows.px[j];
+    const cy = arrows.py[j];
+    const tipX = cx + ux * len * 0.5;
+    const tipY = cy + uy * len * 0.5;
+    const tailX = cx - ux * len * 0.5;
+    const tailY = cy - uy * len * 0.5;
+    const bx = tipX - ux * hl; // the head's base
+    const by = tipY - uy * hl;
+    const nx = -uy;
+    const ny = ux;
+    const level = Math.max(1, Math.round(q * ARROW_LEVELS));
+    const p = paths[level] || (paths[level] = new Path2D());
+    // shaft, reaching 1px into the head; both drawn with the same winding
+    p.moveTo(tailX + nx * w, tailY + ny * w);
+    p.lineTo(bx + ux + nx * w, by + uy + ny * w);
+    p.lineTo(bx + ux - nx * w, by + uy - ny * w);
+    p.lineTo(tailX - nx * w, tailY - ny * w);
+    p.closePath();
+    // head
+    p.moveTo(tipX, tipY);
+    p.lineTo(bx - nx * hw, by - ny * hw);
+    p.lineTo(bx + nx * hw, by + ny * hw);
+    p.closePath();
+  }
+  ctx.setTransform(view.dpr, 0, 0, view.dpr, 0, 0);
+  ctx.globalCompositeOperation = 'lighter';
+  for (let level = 1; level <= ARROW_LEVELS; level++) {
+    if (!paths[level]) continue;
+    ctx.fillStyle = `rgba(${CONFIG.colors.field}, ${CONFIG.ARROW_OPACITY * (level / ARROW_LEVELS) * vis})`;
+    ctx.fill(paths[level]);
+  }
 }
 
 function drawCursor() {
@@ -2218,6 +2102,86 @@ function drawCursor() {
   ctx.globalAlpha = 1;
 }
 
+/* ── Debug overlay (D) ─────────────────────────────────────────────────────
+   The vision cone, each comet's collision radius and size, and the counts
+   for tuning. Every particle is in exactly one state, so flocking +
+   scattered + inside comets must always equal the total. */
+function drawDebug() {
+  const s = view.dpr * view.cell;
+  ctx.setTransform(s, 0, 0, s, view.dpr * view.cx, view.dpr * view.cy);
+  ctx.globalCompositeOperation = 'source-over';
+
+  // the vision cone
+  const half = (CONFIG.CONE_ANGLE * Math.PI) / 360;
+  const g = Math.atan2(eye.hy, eye.hx);
+  const L = CONFIG.CONE_LENGTH;
+  ctx.fillStyle = 'rgba(150, 175, 255, 0.07)';
+  ctx.beginPath();
+  ctx.moveTo(eye.x, eye.y);
+  ctx.arc(eye.x, eye.y, L, g - half, g + half);
+  ctx.closePath();
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(150, 175, 255, 0.7)';
+  ctx.lineWidth = 1.2 * PX;
+  ctx.setLineDash([6 * PX, 5 * PX]);
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  // comets: collision radius and size
+  ctx.strokeStyle = 'rgba(255, 214, 140, 0.8)';
+  ctx.fillStyle = 'rgba(255, 228, 180, 0.95)';
+  ctx.font = `${11 * PX}px "IBM Plex Mono", ui-monospace, monospace`;
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'middle';
+  ctx.lineWidth = 1 * PX;
+  for (const c of comets) {
+    ctx.globalAlpha = c.cool > 0 ? 0.45 : 1;
+    ctx.beginPath();
+    ctx.arc(c.x, c.y, c.r, 0, TAU);
+    ctx.stroke();
+    ctx.fillText(String(c.members.length), c.x + c.r + 4 * PX, c.y - c.r);
+  }
+  ctx.globalAlpha = 1;
+
+  // counts
+  let flocking = 0, scattered = 0, inside = 0;
+  for (let i = 0; i < P.n; i++) {
+    if (P.mode[i] === FLOCK) flocking++;
+    else if (P.mode[i] === SCATTERED) scattered++;
+    else inside++;
+  }
+  const total = flocking + scattered + inside;
+  const expected = state.startCount + state.spawned; // only clicks change the total
+  const ok = total === expected && inside === comets.reduce((a, c) => a + c.members.length, 0);
+  const lines = [
+    'DEBUG  (D to hide)',
+    `particles  ${total} / ${CONFIG.MAX_PARTICLES} max   (${state.startCount} + ${state.spawned} from clicks) ${ok ? '✓' : '✗ not conserved'}`,
+    `  flocking ${flocking}  bursting ${scattered}  in comets ${inside}`,
+    `clumps     ${census.clumps}   sizes ${census.sizes.slice(0, 8).join(' ') || '-'}${census.strays ? `   strays ${census.strays}` : ''}`,
+    `bursts     ${[...scatterGroups.values()].filter((g) => g.kind === 'scatter').length} scattered by the eye   ${[...scatterGroups.values()].filter((g) => g.kind === 'firework').length} fireworks`,
+    `comets     ${comets.length}   sizes ${comets.map((c) => c.members.length).sort((a, b) => b - a).slice(0, 8).join(' ') || '-'}`,
+    `last 10 s  scatters ${events.scatters.length}  comets formed ${events.fusions.length}  collisions ${events.collisions.length}  clicks ${events.spawns.length}`,
+    `eye        ${eye.speed.toFixed(1)} u/s   cone ${CONFIG.CONE_ANGLE}° × ${CONFIG.CONE_LENGTH} u`,
+  ];
+  ctx.setTransform(view.dpr, 0, 0, view.dpr, 0, 0);
+  ctx.font = '11px "IBM Plex Mono", ui-monospace, monospace';
+  ctx.textBaseline = 'top';
+  const w = Math.max(...lines.map((t) => ctx.measureText(t).width)) + 20;
+  const x0 = Math.max(10, view.w - w - 18);
+  const y0 = 44;
+  ctx.fillStyle = 'rgba(8, 9, 14, 0.78)';
+  ctx.fillRect(x0, y0, w, lines.length * 16 + 14);
+  ctx.strokeStyle = 'rgba(223, 227, 238, 0.18)';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(x0 + 0.5, y0 + 0.5, w - 1, lines.length * 16 + 13);
+  lines.forEach((t, k) => {
+    ctx.fillStyle = k === 0 ? 'rgba(223, 227, 238, 0.55)' : 'rgba(223, 227, 238, 0.92)';
+    ctx.fillText(t, x0 + 10, y0 + 8 + k * 16);
+  });
+  ctx.globalAlpha = 1;
+}
+
+
 /* ==========================================================================
    Main loop
    ========================================================================== */
@@ -2241,28 +2205,33 @@ function frame(now) {
   requestAnimationFrame(frame);
 }
 
+// R: a fresh set of clumps; the eye returns to the centre.
 function resetSystem() {
   buildSprites();
-  createSystems();
+  clearComets();
+  seedClumps();
   buildIrisTexture();
   resetEyeball();
+  eye.x = eye.y = eye.vx = eye.vy = eye.speed = 0;
+  eye.hx = 1;
+  eye.hy = 0;
   state.energy = 0;
   state.cursorEnergy = 0;
   cursor.speed = 0;
-  cursor.svx = cursor.svy = 0;
   cursor.skipSample = true;
+  resetArrows();
+  if (intro.phase === 'idle') initIntro();
 }
 
+
 /* ==========================================================================
-   Opening: a drifting galaxy that awakens into the field
+   Opening: a drifting galaxy that awakens into the clumps
    --------------------------------------------------------------------------
    Until the cursor first moves, every star drifts slowly in one wide spiral
-   galaxy around the centre, while the nuclei and the eye sleep. The first
-   movement awakens the system: the title fades away, and each star leaves
-   the galaxy along a gentle curve for its own place on its own nucleus's
-   orbit, inner galaxy first. The nuclei brighten as their stars arrive and
-   the eye condenses out of the galaxy's core. Every star arrives already
-   moving with its orbit, so the hand-over to the field is seamless.
+   galaxy around the centre and the eye sleeps. The first movement awakens
+   the system: the title fades away, each star leaves the galaxy along a
+   gentle curve for its place in its starting clump, inner galaxy first, and
+   the eye condenses out of the galaxy's core. Then the hunt begins.
    ========================================================================== */
 
 const intro = {
@@ -2280,61 +2249,42 @@ const introEl = document.getElementById('intro');
 const GALAXY_FLAT = 0.56;
 const GALAXY_TILT = -0.32;
 const DRIFT = { x: 0, y: 0 };
-const HOME = { x: 0, y: 0 };
 
-// Where each star drifts in the opening galaxy, and its place in the field.
+// Where each star drifts in the opening galaxy, and how it will fly to its clump.
 function initIntro() {
-  for (const S of systems) {
-    const n = S.n;
-    S.gr = new Float32Array(n); // share of the galaxy's radius
-    S.ga = new Float32Array(n); // angle in the galaxy
-    S.gw = new Float32Array(n); // how fast it turns (rad / s): inner stars faster
-    S.gd = new Float32Array(n); // when it leaves for its orbit (s)
-    S.gu = new Float32Array(n); // how long its flight takes (s)
-    S.gc = new Float32Array(n); // how much its path curves
-    for (let i = 0; i < n; i++) {
-      const r = 0.06 + 0.94 * Math.pow(Math.random(), 0.85);
-      let a;
-      if (Math.random() < 0.22) a = Math.random() * TAU; // a diffuse halo
-      else {
-        const arm = Math.random() < 0.5 ? 0 : Math.PI;
-        const scatter = (Math.random() + Math.random() + Math.random() - 1.5) * (0.22 + 0.55 * r);
-        a = arm - 2.8 * Math.log(0.12 + r) + scatter; // two trailing spiral arms
-      }
-      S.gr[i] = r;
-      S.ga[i] = a;
-      S.gw[i] = 0.1 / Math.sqrt(0.15 + r);
-      S.gd[i] = 0.1 + CONFIG.INTRO_STAGGER * (0.7 * r + 0.3 * Math.random());
-      S.gu[i] = CONFIG.INTRO_TRANSFORM_TIME * (0.8 + 0.4 * Math.random());
-      S.gc[i] = 0.1 + 0.24 * Math.random();
-      driftPos(S, i, DRIFT);
-      S.px[i] = S.lx[i] = DRIFT.x;
-      S.py[i] = S.ly[i] = DRIFT.y;
-      S.vx[i] = S.vy[i] = 0;
+  for (let i = 0; i < P.n; i++) {
+    const r = 0.06 + 0.94 * Math.pow(Math.random(), 0.85);
+    let a;
+    if (Math.random() < 0.22) a = Math.random() * TAU; // a diffuse halo
+    else {
+      const arm = Math.random() < 0.5 ? 0 : Math.PI;
+      const scatter = (Math.random() + Math.random() + Math.random() - 1.5) * (0.22 + 0.55 * r);
+      a = arm - 2.8 * Math.log(0.12 + r) + scatter; // two trailing spiral arms
     }
-    S.appear = 0;
-    S.shown = 0;
+    P.gr[i] = r;
+    P.ga[i] = a;
+    P.gw[i] = 0.1 / Math.sqrt(0.15 + r);
+    P.gd[i] = 0.1 + CONFIG.INTRO_STAGGER * (0.7 * r + 0.3 * Math.random());
+    P.gu[i] = CONFIG.INTRO_TRANSFORM_TIME * (0.8 + 0.4 * Math.random());
+    P.gc[i] = 0.1 + 0.24 * Math.random();
+    driftPos(i, DRIFT);
+    P.x[i] = P.lx[i] = DRIFT.x;
+    P.y[i] = P.ly[i] = DRIFT.y;
+    P.vx[i] = P.vy[i] = 0;
   }
 }
 
-function driftPos(S, i, out) {
-  const r = S.gr[i] * Math.hypot(view.halfW, view.halfH) * 0.95;
-  const a = S.ga[i] + S.gw[i] * CONFIG.INTRO_DRIFT_SPEED * CONFIG.BASE_MOTION * intro.clock;
+function driftPos(i, out) {
+  const r = P.gr[i] * Math.hypot(view.halfW, view.halfH) * 0.95;
+  const a = P.ga[i] + P.gw[i] * CONFIG.INTRO_DRIFT_SPEED * CONFIG.BASE_MOTION * intro.clock;
   const x = r * Math.cos(a);
   const y = r * Math.sin(a) * GALAXY_FLAT;
   const tilt = GALAXY_TILT + (view.portrait ? Math.PI / 2 : 0); // stands upright on portrait screens
   const ct = Math.cos(tilt);
   const st = Math.sin(tilt);
-  flowAt(x * 0.6 + S.id, y * 0.6, intro.clock * 0.25, FLOW);
+  flowAt(x * 0.6 + Math.floor(i / 90), y * 0.6, intro.clock * 0.25, FLOW);
   out.x = x * ct - y * st + FLOW.x * 0.05;
   out.y = x * st + y * ct + FLOW.y * 0.05;
-}
-
-function homePos(S, i, out) {
-  const ox = S.r[i] * Math.cos(S.th[i]);
-  const oy = S.r[i] * Math.sin(S.th[i]) * S.flat;
-  out.x = S.x + ox * S.ca - oy * S.sa;
-  out.y = S.y + ox * S.sa + oy * S.ca;
 }
 
 function easeOutBack(x) {
@@ -2350,34 +2300,25 @@ function updateIntro(dt) {
   updateIris(dt);
   updateEyeball(dt);
 
-  const bm = CONFIG.BASE_MOTION;
   let arrivedAll = waking;
-  for (const S of systems) {
-    let arrived = 0;
-    for (let i = 0; i < S.n; i++) {
-      S.th[i] += S.w[i] * dt * bm; // its place on the orbit keeps turning
-      driftPos(S, i, DRIFT);
-      let x = DRIFT.x;
-      let y = DRIFT.y;
-      if (waking) {
-        const p = clamp((intro.t - S.gd[i]) / S.gu[i], 0, 1);
-        if (p < 1) arrivedAll = false;
-        const e = p * p * p * (p * (p * 6 - 15) + 10); // eased at both ends
-        homePos(S, i, HOME);
-        const dx = HOME.x - DRIFT.x;
-        const dy = HOME.y - DRIFT.y;
-        const bend = Math.sin(Math.PI * e) * S.gc[i]; // a gentle sideways curve, turning with the galaxy
-        x = DRIFT.x + dx * e - dy * bend;
-        y = DRIFT.y + dy * e + dx * bend;
-        arrived += e;
-      }
-      S.vx[i] = x - S.px[i];
-      S.vy[i] = y - S.py[i];
-      S.px[i] = x;
-      S.py[i] = y;
+  for (let i = 0; i < P.n; i++) {
+    driftPos(i, DRIFT);
+    let x = DRIFT.x;
+    let y = DRIFT.y;
+    if (waking) {
+      const p = clamp((intro.t - P.gd[i]) / P.gu[i], 0, 1);
+      if (p < 1) arrivedAll = false;
+      const e = p * p * p * (p * (p * 6 - 15) + 10); // eased at both ends
+      const dx = P.tx[i] - DRIFT.x;
+      const dy = P.ty[i] - DRIFT.y;
+      const bend = Math.sin(Math.PI * e) * P.gc[i]; // a gentle sideways curve, turning with the galaxy
+      x = DRIFT.x + dx * e - dy * bend;
+      y = DRIFT.y + dy * e + dx * bend;
     }
-    S.appear = smoothstep(0.2, 0.95, arrived / S.n);
-    S.shown = S.appear;
+    P.vx[i] = (x - P.x[i]) / Math.max(dt, 1e-4);
+    P.vy[i] = (y - P.y[i]) / Math.max(dt, 1e-4);
+    P.x[i] = x;
+    P.y[i] = y;
   }
 
   // The eye condenses out of the galaxy's core, whose glow gives way to it.
@@ -2410,17 +2351,14 @@ function finishIntro() {
   intro.eye = 1;
   intro.glow = 0;
   intro.starVis = 1;
-  for (const S of systems) {
-    S.appear = 1;
-    S.shown = 1;
-    for (let i = 0; i < S.n; i++) {
-      S.bond[i] = 1;
-      S.free[i] = 0;
-      S.sax[i] = S.say[i] = 0;
-    }
+  for (let i = 0; i < P.n; i++) {
+    P.vx[i] = P.vy[i] = 0; // the clumps start from rest, and the wander current sets them going
+    P.mode[i] = FLOCK;
+    P.cool[i] = CONFIG.CLUMP_COOLDOWN; // newly formed: a moment before the eye can scatter them
   }
   document.body.classList.remove('is-intro');
   if (introEl) {
+    introEl.classList.add('is-leaving');
     introEl.setAttribute('aria-hidden', 'true');
     setTimeout(() => (introEl.hidden = true), 1600);
   }
@@ -2435,6 +2373,7 @@ function drawIntroGlow() {
   ctx.drawImage(nucleusSprite, -0.35, -0.3, 0.7, 0.6);
   ctx.globalAlpha = 1;
 }
+
 
 /* ==========================================================================
    Interaction
@@ -2461,6 +2400,14 @@ canvas.addEventListener('pointerdown', (e) => {
   if (e.pointerType === 'touch' && !touchHelpTimer) {
     touchHelpTimer = setTimeout(() => helpPanel.classList.add('is-hidden'), 4000);
   }
+});
+// A click adds a new clump at the cursor (not during the opening).
+canvas.addEventListener('click', (e) => {
+  if (intro.phase !== 'done') return;
+  const rect = canvas.getBoundingClientRect();
+  const x = (e.clientX - rect.left - view.cx) / view.cell;
+  const y = (e.clientY - rect.top - view.cy) / view.cell;
+  if (!spawnClump(x, y)) showStatus(`Particle limit reached (${P.n} of ${CONFIG.MAX_PARTICLES})`);
 });
 canvas.addEventListener('pointerup', (e) => {
   if (e.pointerType !== 'mouse') cursor.targetPresence = 0;
@@ -2513,7 +2460,8 @@ window.addEventListener('keydown', (e) => {
       break;
     case 'KeyV':
       state.showVectors = !state.showVectors;
-      showStatus(state.showVectors ? 'Vector field on' : 'Vector field off');
+      resetArrows();
+      showStatus(state.showVectors ? 'Vector field on (shows while the eye moves)' : 'Vector field off');
       break;
     case 'KeyR':
       resetSystem();
@@ -2521,6 +2469,10 @@ window.addEventListener('keydown', (e) => {
       break;
     case 'KeyH':
       toggleHelp();
+      break;
+    case 'KeyD':
+      state.debug = !state.debug;
+      showStatus(state.debug ? 'Debug overlay on' : 'Debug overlay off');
       break;
     default:
   }
@@ -2538,8 +2490,9 @@ window.addEventListener('keyup', (e) => {
 window.addEventListener('resize', resize);
 resize();
 buildSprites();
-createSystems();
+seedClumps();
 buildIrisTexture();
+if (intro.phase === 'idle') initIntro();
 if (intro.phase === 'done') finishIntro(); // the opening is switched off
 else document.body.classList.add('is-intro'); // (also set in the HTML, so nothing flashes)
 if (intro.phase !== 'done' && introEl) {
@@ -2552,4 +2505,4 @@ requestAnimationFrame((t) => {
 });
 
 // Handy for tuning from the browser console.
-window.GAZE_FIELD = { CONFIG, state, cursor, systems: () => systems, comets: () => comets };
+window.GAZE_FIELD = { CONFIG, state, cursor, eye, particles: P, comets: () => comets, census };

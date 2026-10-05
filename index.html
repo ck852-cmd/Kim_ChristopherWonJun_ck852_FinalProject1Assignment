@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Gaze Field</title>
-  <meta name="description" content="An interactive vector-field study of attraction, rejection, freedom and control. Forty fixed nuclei hold orbiting stars; one cursor pulls them, one cosmic eye watches.">
+  <meta name="description" content="An interactive predator–prey study in starlight: flocking clumps of stars, a cosmic eye that hunts them, and comets that collide back into clumps.">
   <meta name="theme-color" content="#000000">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%23000'/%3E%3Cellipse cx='32' cy='32' rx='24' ry='11' fill='none' stroke='%23d9dfee' stroke-opacity='.55' stroke-width='1.5'/%3E%3Ccircle cx='32' cy='32' r='10' fill='none' stroke='%23f3d59a' stroke-width='3'/%3E%3Ccircle cx='32' cy='32' r='6' fill='%23000'/%3E%3C/svg%3E">
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -14,7 +14,7 @@
 </head>
 <body class="is-intro">
   <canvas id="field" role="img"
-    aria-label="Gaze Field: forty fixed glowing nuclei on a black field, each circled by orbiting star particles that stretch toward the pointer and scatter when it moves fast, fusing into comets that chase the pointer, around a galactic eyeball whose iris and pupil follow it."></canvas>
+    aria-label="Gaze Field: clumps of star particles flock and wander across a black field while a galactic eye follows the pointer. A clump the eye looks at scatters and fuses into a fast comet; comets bounce off the edges, and two that collide become a new clump."></canvas>
 
   <div class="mark" aria-hidden="true">Gaze Field</div>
 
@@ -28,12 +28,13 @@
 
   <aside id="help" class="help" aria-label="Instructions">
     <p><span class="lead"><span class="only-fine">Move</span><span class="only-coarse">Drag</span></span>
-      slowly to pull the orbits. Fast scatters them into comets that chase the cursor; left alone, every star drifts home.</p>
-    <p><span class="lead">Eye</span>
-      pushes what it faces, draws in what is behind.</p>
+      to lead the eye; <span class="only-fine">click</span><span class="only-coarse">tap</span> to add a clump. A clump the eye looks at scatters, then fuses into a comet.</p>
+    <p><span class="lead">Comets</span>
+      bounce off the edges; two that collide become a new clump.</p>
     <p class="keys">
-      <span><kbd>V</kbd> vectors</span> <span><kbd>Space</kbd> pause</span>
+      <span><kbd>V</kbd> field</span> <span><kbd>Space</kbd> pause</span>
       <span><kbd>R</kbd> reset</span> <span><kbd>H</kbd> hide</span>
+      <span><kbd>D</kbd> debug</span>
     </p>
   </aside>
 
