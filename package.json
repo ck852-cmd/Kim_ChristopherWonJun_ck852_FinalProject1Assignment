@@ -1,0 +1,11 @@
+{
+  "name": "gaze-field",
+  "private": true,
+  "description": "Gaze Field: an eye that hunts flocking clumps of stars",
+  "scripts": {
+    "record-gif": "node scripts/record-gif.js"
+  },
+  "devDependencies": {
+    "puppeteer-core": "^25.12.0"
+  }
+}

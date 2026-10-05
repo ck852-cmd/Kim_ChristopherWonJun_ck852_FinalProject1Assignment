@@ -4,6 +4,10 @@ An interactive creative-coding piece about a predator and its prey, drawn in sta
 
 **Live site:** <https://ck852-cmd.github.io/Kim_ChristopherWonJun_ck852_FinalProject1Assignment/>
 
+![Gaze Field teaser: the galactic eye scatters two clumps of stars into comets, which collide in a firework](gifs/gaze-field-teaser.gif)
+
+*The eye scatters a clump and pauses, so its vector field fades out. It moves on, the field fades back in, and it scatters a second clump. The two comets meet in a firework, which gathers into a new clump.*
+
 **Clumps of stars** flock and wander across the screen, and a click adds a new one. A **galactic eye** follows the cursor and hunts them. Its vision cone points the way it is moving.
 
 It opens on a **sleeping galaxy**. Every star drifts slowly in one wide spiral around the centre under the title *Gaze Field* and the line "Move your cursor to awaken the system." The first real movement of the cursor awakens it. The text fades away, each star curves out of the galaxy into its starting clump, and the eye condenses out of the galaxy's core.
@@ -76,6 +80,19 @@ python3 -m http.server 8000
 
 Then open <http://localhost:8000>. Opening `index.html` directly also works in most browsers.
 
+## Record the teaser
+
+`scripts/record-gif.js` re-records `gifs/gaze-field-teaser.gif` after future changes. It needs Node, Google Chrome and ffmpeg (`brew install ffmpeg`):
+
+```bash
+npm install
+npm run record-gif
+```
+
+The script opens the piece in headless Chrome at 1280×720. It steps the simulation itself with a seeded random generator, so a run can be repeated exactly, and moves the cursor along a scripted path: the eye sweeps one clump, pauses so the arrows fade out, then moves on so they fade back in and sweeps another. A bounce adds a small random turn, so it dry-runs seeds until one shows both scatters, both comets, and a collision by 8 s that is clear of the edges. It records that seed at 20 fps and builds the GIF with ffmpeg in two passes: a palette, then the frames through it.
+
+The GIF is 800 px wide unless that comes out over 10 MB. If it does, the script steps down the width, then the frame rate. The current teaser is 720 px wide, because at 800 px it came out at 11.7 MB. The scene, the cursor path and the limits are constants at the top of the script. `--dry` searches without recording, `--seed=N` records a given seed, and `--verbose` prints where each scatter, comet and collision happens.
+
 ## Publish on GitHub Pages
 
 1. Put `index.html`, `styles.css`, `script.js`, `README.md` and `.nojekyll` at the root of a GitHub repository and push to `main`.
@@ -147,6 +164,9 @@ index.html     page shell and instruction panel
 styles.css     black-field chrome around the canvas
 script.js      simulation and rendering (CONFIG at the top)
 assets/        gaze-field-teaser.gif (a teaser of an earlier version) and an early concept reference; neither is used by the page
+gifs/          gaze-field-teaser.gif, the 10-second teaser of this version
+scripts/       record-gif.js, which records the teaser (npm run record-gif)
+package.json   the recorder's one dependency (puppeteer-core); the page itself needs none
 .nojekyll      serve files as-is on GitHub Pages
 ```
 
